@@ -3,14 +3,14 @@ import MenuContent from 'Components/Menu/MenuContent';
 import SortMenu from 'Components/Menu/SortMenu';
 import SortMenuItem from 'Components/Menu/SortMenuItem';
 import { align } from 'Helpers/Props';
-import SortDirection from 'Helpers/Props/SortDirection';
+import { SortDirection } from 'Helpers/Props/sortDirections';
 import translate from 'Utilities/String/translate';
 
 interface SeriesIndexSortMenuProps {
   sortKey?: string;
   sortDirection?: SortDirection;
   isDisabled: boolean;
-  onSortSelect(sortKey: string): unknown;
+  onSortSelect(sortKey: string): void;
 }
 
 function SeriesIndexSortMenu(props: SeriesIndexSortMenuProps) {
@@ -44,6 +44,15 @@ function SeriesIndexSortMenu(props: SeriesIndexSortMenuProps) {
           onPress={onSortSelect}
         >
           {translate('Network')}
+        </SortMenuItem>
+
+        <SortMenuItem
+          name="originalCountry"
+          sortKey={sortKey}
+          sortDirection={sortDirection}
+          onPress={onSortSelect}
+        >
+          {translate('OriginalCountry')}
         </SortMenuItem>
 
         <SortMenuItem
@@ -146,12 +155,30 @@ function SeriesIndexSortMenu(props: SeriesIndexSortMenuProps) {
         </SortMenuItem>
 
         <SortMenuItem
+          name="averageSizePerEpisode"
+          sortKey={sortKey}
+          sortDirection={sortDirection}
+          onPress={onSortSelect}
+        >
+          {translate('AverageSizePerEpisode')}
+        </SortMenuItem>
+
+        <SortMenuItem
           name="tags"
           sortKey={sortKey}
           sortDirection={sortDirection}
           onPress={onSortSelect}
         >
           {translate('Tags')}
+        </SortMenuItem>
+
+        <SortMenuItem
+          name="ratings"
+          sortKey={sortKey}
+          sortDirection={sortDirection}
+          onPress={onSortSelect}
+        >
+          {translate('Rating')}
         </SortMenuItem>
       </MenuContent>
     </SortMenu>

@@ -1,4 +1,6 @@
+using System.Linq;
 using FluentAssertions;
+using NLog;
 using NUnit.Framework;
 using NzbDrone.Common.Instrumentation;
 
@@ -18,6 +20,9 @@ namespace NzbDrone.Common.Test.InstrumentationTests
         [TestCase(@"https://baconbits.org/feeds.php?feed=torrents_tv&user=12345&auth=2b51db35e1910123321025a12b9933d2&passkey=mySecret&authkey=2b51db35e1910123321025a12b9933d2")]
         [TestCase(@"http://127.0.0.1:9117/dl/indexername?jackett_apikey=flwjiefewklfjacketmySecretsdfldskjfsdlk&path=we0re9f0sdfbase64sfdkfjsdlfjk&file=The+Torrent+File+Name.torrent")]
         [TestCase(@"http://nzb.su/getnzb/2b51db35e1912ffc138825a12b9933d2.nzb&i=37292&r=2b51db35e1910123321025a12b9933d2")]
+        [TestCase(@"http://nzb.su/rss?t=-2&dl=1&i=37292&r=2b51db35e1910123321025a12b9933d2")]
+        [TestCase(@"https://b-hd.me/torrent/download/auto.343756.is1t1pl127p1sfwur8h4kgyhg1wcsn05")]
+        [TestCase(@"https://b-hd.me/torrent/download/a-slug-in-the-url.343756.is1t1pl127p1sfwur8h4kgyhg1wcsn05")]
 
         // NzbGet
         [TestCase(@"{ ""Name"" : ""ControlUsername"", ""Value"" : ""mySecret"" }, { ""Name"" : ""ControlPassword"", ""Value"" : ""mySecret"" }, ")]
@@ -88,6 +93,10 @@ namespace NzbDrone.Common.Test.InstrumentationTests
         [TestCase(@"https://discord.com/api/webhooks/mySecret")]
         [TestCase(@"https://discord.com/api/webhooks/mySecret/01233210")]
 
+        // Telegram
+        [TestCase(@"https://api.telegram.org/bot1234567890:mySecret/sendmessage: chat_id=123456&parse_mode=HTML&text=<text>")]
+        [TestCase(@"https://api.telegram.org/bot1234567890:mySecret/")]
+
         public void should_clean_message(string message)
         {
             var cleansedMessage = CleanseLogMessage.Cleanse(message);
@@ -122,6 +131,17 @@ namespace NzbDrone.Common.Test.InstrumentationTests
             cleansedMessage.Should().NotContain(".2.3.");
         }
 
+        [TestCase(@"User 'mySecret@example.com' is not authorized to access this application")]
+        [TestCase(@"Auth-Logout ip 127.0.0.1 username 'mySecret@example.com'")]
+        [TestCase(@"Sending email to mySecret@sub.example.co.uk failed")]
+        public void should_clean_email(string message)
+        {
+            var cleansedMessage = CleanseLogMessage.Cleanse(message);
+
+            cleansedMessage.Should().NotContain("mySecret");
+            cleansedMessage.Should().Contain("(removed)@");
+        }
+
         [TestCase(@"Some message (from 10.2.3.2 user agent)")]
         [TestCase(@"Auth-Unauthorized ip 32.2.3.5")]
         [TestCase(@"Auth-Failure ip 32.2.3.5")]
@@ -130,6 +150,30 @@ namespace NzbDrone.Common.Test.InstrumentationTests
             var cleansedMessage = CleanseLogMessage.Cleanse(message);
 
             cleansedMessage.Should().Be(message);
+        }
+
+        [Test]
+        public void should_cleanse_rendered_log_event()
+        {
+            var logEvent = new LogEventInfo(LogLevel.Info, "Test", "http://127.0.0.1:1234/api/call?vv=1&apikey=mySecret");
+
+            var cleansedMessage = CleanseLogMessage.Cleanse(logEvent, e => $"{e.Level}|{e.LoggerName}|{e.FormattedMessage}");
+
+            cleansedMessage.Should().Be("Info|Test|http://127.0.0.1:1234/api/call?vv=1&apikey=(removed)");
+        }
+
+        [TestCase("a", 256000)]
+        [TestCase("a.", 128000)]
+        [TestCase("/rss", 16000)]
+        [TestCase("&", 64000)]
+        [TestCase("?", 64000)]
+        public void should_cleanse_pathological_message_without_timing_out(string repeated, int count)
+        {
+            var message = "Unable to parse '" + string.Concat(Enumerable.Repeat(repeated, count)) + "'";
+
+            var cleansedMessage = CleanseLogMessage.Cleanse(message);
+
+            cleansedMessage.Should().NotContain("timed out");
         }
     }
 }

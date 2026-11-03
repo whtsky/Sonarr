@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using NLog;
 using NzbDrone.Common.Disk;
 using NzbDrone.Common.Extensions;
@@ -42,6 +43,11 @@ namespace NzbDrone.Core.Extras.Others
         }
 
         public override IEnumerable<ExtraFile> CreateAfterSeriesScan(Series series, List<EpisodeFile> episodeFiles)
+        {
+            return Enumerable.Empty<ExtraFile>();
+        }
+
+        public override IEnumerable<ExtraFile> CreateAfterEpisodesImported(Series series)
         {
             return Enumerable.Empty<ExtraFile>();
         }
@@ -121,7 +127,7 @@ namespace NzbDrone.Core.Extras.Others
                         continue;
                     }
 
-                    if (fileEpisodeInfo.SeasonNumber == localEpisode.FileEpisodeInfo.SeasonNumber &&
+                    if (fileEpisodeInfo.SeasonNumbers.SequenceEqual(localEpisode.FileEpisodeInfo.SeasonNumbers) &&
                         fileEpisodeInfo.EpisodeNumbers.SequenceEqual(localEpisode.FileEpisodeInfo.EpisodeNumbers))
                     {
                         matchingFiles.Add(file);
@@ -133,14 +139,19 @@ namespace NzbDrone.Core.Extras.Others
                 }
             }
 
+            var copy = 1;
+
             foreach (var file in matchingFiles)
             {
                 try
                 {
-                    var extraFile = ImportFile(localEpisode.Series, episodeFile, file, isReadOnly, Path.GetExtension(file), null);
+                    var suffix = GetSuffix(copy, matchingFiles.Count > 1);
+                    var extraFile = ImportFile(localEpisode.Series, episodeFile, file, isReadOnly, Path.GetExtension(file), suffix);
                     _mediaFileAttributeService.SetFilePermissions(file);
                     _otherExtraFileService.Upsert(extraFile);
                     importedFiles.Add(extraFile);
+
+                    copy++;
                 }
                 catch (Exception ex)
                 {
@@ -149,6 +160,19 @@ namespace NzbDrone.Core.Extras.Others
             }
 
             return importedFiles;
+        }
+
+        private static string GetSuffix(int copy, bool multipleCopies = false)
+        {
+            var suffixBuilder = new StringBuilder();
+
+            if (multipleCopies)
+            {
+                suffixBuilder.Append('.');
+                suffixBuilder.Append(copy);
+            }
+
+            return suffixBuilder.ToString();
         }
     }
 }

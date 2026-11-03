@@ -53,6 +53,11 @@ namespace NzbDrone.Core.Extras.Subtitles
             return Enumerable.Empty<SubtitleFile>();
         }
 
+        public override IEnumerable<ExtraFile> CreateAfterEpisodesImported(Series series)
+        {
+            return Enumerable.Empty<SubtitleFile>();
+        }
+
         public override IEnumerable<ExtraFile> CreateAfterEpisodeImport(Series series, EpisodeFile episodeFile)
         {
             return Enumerable.Empty<SubtitleFile>();
@@ -135,7 +140,7 @@ namespace NzbDrone.Core.Extras.Subtitles
                         continue;
                     }
 
-                    if (fileEpisodeInfo.SeasonNumber == localEpisode.FileEpisodeInfo.SeasonNumber &&
+                    if (fileEpisodeInfo.SeasonNumbers.SequenceEqual(localEpisode.FileEpisodeInfo.SeasonNumbers) &&
                         fileEpisodeInfo.EpisodeNumbers.SequenceEqual(localEpisode.FileEpisodeInfo.EpisodeNumbers))
                     {
                         matchingFiles.Add(file);

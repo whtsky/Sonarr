@@ -43,7 +43,10 @@ namespace NzbDrone.Core.ImportLists.Custom
                 {
                     series.Add(new ImportListItemInfo
                     {
-                        TvdbId = item.TvdbId
+                        Title = item.Title.IsNullOrWhiteSpace() ? $"TvdbId: {item.TvdbId}" : item.Title,
+                        TvdbId = item.TvdbId,
+                        TmdbId = item.TmdbId,
+                        ImdbId = item.ImdbId
                     });
                 }
 

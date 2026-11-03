@@ -1,40 +1,57 @@
+import classNames from 'classnames';
 import React, { SyntheticEvent, useCallback } from 'react';
-import { useSelect } from 'App/SelectContext';
+import { useSelect } from 'App/Select/SelectContext';
 import Icon from 'Components/Icon';
 import Link from 'Components/Link/Link';
 import { icons } from 'Helpers/Props';
-import styles from './SeriesIndexPosterSelect.css';
+import getSeriesPath from 'Utilities/Series/getSeriesPath';
+import styles from './SeriesIndexPosterSelect.module.css';
 
 interface SeriesIndexPosterSelectProps {
   seriesId: number;
+  titleSlug: string;
 }
 
-function SeriesIndexPosterSelect(props: SeriesIndexPosterSelectProps) {
-  const { seriesId } = props;
-  const [selectState, selectDispatch] = useSelect();
-  const isSelected = selectState.selectedState[seriesId];
+function SeriesIndexPosterSelect({
+  seriesId,
+  titleSlug,
+}: SeriesIndexPosterSelectProps) {
+  const { toggleSelected, useIsSelected } = useSelect();
+  const isSelected = useIsSelected(seriesId);
 
   const onSelectPress = useCallback(
-    (event: SyntheticEvent) => {
-      const nativeEvent = event.nativeEvent as PointerEvent;
-      const shiftKey = nativeEvent.shiftKey;
+    (event: SyntheticEvent<HTMLElement, PointerEvent>) => {
+      if (event.nativeEvent.ctrlKey || event.nativeEvent.metaKey) {
+        window.open(
+          `${window.Sonarr.urlBase}${getSeriesPath({
+            id: seriesId,
+            titleSlug,
+          })}`,
+          '_blank'
+        );
+        return;
+      }
 
-      selectDispatch({
-        type: 'toggleSelected',
+      const shiftKey = event.nativeEvent.shiftKey;
+
+      toggleSelected({
         id: seriesId,
         isSelected: !isSelected,
         shiftKey,
       });
     },
-    [seriesId, isSelected, selectDispatch]
+    [seriesId, titleSlug, isSelected, toggleSelected]
   );
 
   return (
     <Link className={styles.checkButton} onPress={onSelectPress}>
       <span className={styles.checkContainer}>
         <Icon
-          className={isSelected ? styles.selected : styles.unselected}
-          name={isSelected ? icons.CHECK_CIRCLE : icons.CIRCLE_OUTLINE}
+          className={classNames(
+            styles.icon,
+            isSelected ? styles.selected : styles.unselected
+          )}
+          name={isSelected ? icons.CHECK_CIRCLE : icons.CIRCLE}
           size={20}
         />
       </span>

@@ -36,6 +36,7 @@ namespace Sonarr.Api.V3.Config
             SharedValidator.RuleFor(c => c.SeriesFolderFormat).ValidSeriesFolderFormat();
             SharedValidator.RuleFor(c => c.SeasonFolderFormat).ValidSeasonFolderFormat();
             SharedValidator.RuleFor(c => c.SpecialsFolderFormat).ValidSpecialsFolderFormat();
+            SharedValidator.RuleFor(c => c.CustomColonReplacementFormat).ValidCustomColonReplacement().When(c => c.ColonReplacementFormat == (int)ColonReplacementFormat.Custom);
         }
 
         protected override NamingConfigResource GetResourceById(int id)
@@ -53,7 +54,7 @@ namespace Sonarr.Api.V3.Config
         }
 
         [RestPutById]
-        public ActionResult<NamingConfigResource> UpdateNamingConfig(NamingConfigResource resource)
+        public ActionResult<NamingConfigResource> UpdateNamingConfig([FromBody] NamingConfigResource resource)
         {
             var nameSpec = resource.ToModel();
             ValidateFormatResult(nameSpec);
@@ -64,14 +65,14 @@ namespace Sonarr.Api.V3.Config
         }
 
         [HttpGet("examples")]
-        public object GetExamples([FromQuery]NamingConfigResource config)
+        public object GetExamples([FromQuery]NamingConfigResource settings)
         {
-            if (config.Id == 0)
+            if (settings.Id == 0)
             {
-                config = GetNamingConfig();
+                settings = GetNamingConfig();
             }
 
-            var nameSpec = config.ToModel();
+            var nameSpec = settings.ToModel();
             var sampleResource = new NamingExampleResource();
 
             var singleEpisodeSampleResult = _filenameSampleService.GetStandardSample(nameSpec);

@@ -51,7 +51,7 @@ namespace NzbDrone.Test.Common.AutoMoq
 
             if (behavior != MockBehavior.Default && mock.Behavior == MockBehavior.Default)
             {
-                throw new InvalidOperationException("Unable to change be behaviour of a an existing mock.");
+                throw new InvalidOperationException("Unable to change be behaviour of an existing mock.");
             }
 
             return mock;
@@ -112,7 +112,8 @@ namespace NzbDrone.Test.Common.AutoMoq
                                 var mock = (Mock)r.Resolve(mockType);
                                 SetMock(serviceType, mock);
                                 return mock.Object;
-                            }, Reuse.Singleton);
+                            },
+                                Reuse.Singleton);
 
                             return new[] { new DynamicRegistration(mockFactory, IfAlreadyRegistered.Keep) };
                         }

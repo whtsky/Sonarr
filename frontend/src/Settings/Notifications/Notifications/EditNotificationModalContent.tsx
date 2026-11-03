@@ -1,0 +1,187 @@
+import React, { useCallback, useEffect } from 'react';
+import Alert from 'Components/Alert';
+import Form from 'Components/Form/Form';
+import FormInput from 'Components/Form/FormInput';
+import FormInputHelpText from 'Components/Form/FormInputHelpText';
+import FormLabel from 'Components/Form/FormLabel';
+import FormRow from 'Components/Form/FormRow';
+import ProviderFieldFormGroup from 'Components/Form/ProviderFieldFormGroup';
+import Button from 'Components/Link/Button';
+import SpinnerErrorButton from 'Components/Link/SpinnerErrorButton';
+import ModalBody from 'Components/Modal/ModalBody';
+import ModalContent from 'Components/Modal/ModalContent';
+import ModalFooter from 'Components/Modal/ModalFooter';
+import ModalHeader from 'Components/Modal/ModalHeader';
+import usePrevious from 'Helpers/Hooks/usePrevious';
+import { inputTypes, kinds } from 'Helpers/Props';
+import AdvancedSettingsButton from 'Settings/AdvancedSettingsButton';
+import { useShowAdvancedSettings } from 'Settings/advancedSettingsStore';
+import { useManageConnection } from 'Settings/Notifications/useConnections';
+import { SelectedSchema } from 'Settings/useProviderSchema';
+import { EnhancedSelectInputChanged, InputChanged } from 'typings/inputs';
+import translate from 'Utilities/String/translate';
+import NotificationEventItems from './NotificationEventItems';
+import styles from './EditNotificationModalContent.module.css';
+
+export interface EditNotificationModalContentProps {
+  id?: number;
+  selectedSchema?: SelectedSchema;
+  onModalClose: () => void;
+  onDeleteNotificationPress?: () => void;
+}
+
+function EditNotificationModalContent({
+  id,
+  selectedSchema,
+  onModalClose,
+  onDeleteNotificationPress,
+}: EditNotificationModalContentProps) {
+  const showAdvancedSettings = useShowAdvancedSettings();
+
+  const {
+    item,
+    updateFieldValue,
+    updateValue,
+    saveProvider,
+    isSaving,
+    saveError,
+    testProvider,
+    isTesting,
+    validationErrors,
+    validationWarnings,
+  } = useManageConnection(id, selectedSchema);
+
+  const wasSaving = usePrevious(isSaving);
+
+  const { implementationName, name, fields, tags, message } = item;
+
+  const handleInputChange = useCallback(
+    (change: InputChanged) => {
+      // @ts-expect-error - change is not yet typed
+      updateValue(change.name, change.value);
+    },
+    [updateValue]
+  );
+
+  const handleFieldChange = useCallback(
+    ({
+      name,
+      value,
+      additionalProperties,
+    }: EnhancedSelectInputChanged<unknown>) => {
+      updateFieldValue({ [name]: value, ...additionalProperties });
+    },
+    [updateFieldValue]
+  );
+
+  const handleTestPress = useCallback(() => {
+    testProvider();
+  }, [testProvider]);
+
+  const handleSavePress = useCallback(() => {
+    saveProvider();
+  }, [saveProvider]);
+
+  useEffect(() => {
+    if (wasSaving && !isSaving && !saveError) {
+      onModalClose();
+    }
+  }, [isSaving, wasSaving, saveError, onModalClose]);
+
+  return (
+    <ModalContent onModalClose={onModalClose}>
+      <ModalHeader subtitle={id ? name.previousValue ?? name.value : undefined}>
+        {id
+          ? translate('EditConnectionImplementation', { implementationName })
+          : translate('AddConnectionImplementation', { implementationName })}
+      </ModalHeader>
+      <ModalBody>
+        <Form
+          validationErrors={validationErrors}
+          validationWarnings={validationWarnings}
+        >
+          {message ? (
+            <Alert className={styles.message} kind={message.value.type}>
+              {message.value.message}
+            </Alert>
+          ) : null}
+
+          <FormRow>
+            <FormLabel>{translate('Name')}</FormLabel>
+
+            <FormInput
+              type={inputTypes.TEXT}
+              name="name"
+              {...name}
+              onChange={handleInputChange}
+            />
+          </FormRow>
+
+          <NotificationEventItems
+            item={item}
+            onInputChange={handleInputChange}
+          />
+
+          {fields.map((field) => {
+            return (
+              <ProviderFieldFormGroup
+                key={field.name}
+                {...field}
+                advancedSettings={showAdvancedSettings}
+                provider="notification"
+                providerData={item}
+                onChange={handleFieldChange}
+              />
+            );
+          })}
+
+          <FormRow>
+            <FormLabel>{translate('Tags')}</FormLabel>
+            <FormInputHelpText
+              text={translate('NotificationsTagsSeriesHelpText')}
+            />
+            <FormInput
+              type={inputTypes.TAG}
+              name="tags"
+              {...tags}
+              onChange={handleInputChange}
+            />
+          </FormRow>
+        </Form>
+      </ModalBody>
+      <ModalFooter>
+        {id ? (
+          <Button
+            className={styles.deleteButton}
+            kind={kinds.DANGER}
+            onPress={onDeleteNotificationPress}
+          >
+            {translate('Delete')}
+          </Button>
+        ) : null}
+
+        <AdvancedSettingsButton showLabel={false} />
+
+        <SpinnerErrorButton
+          isSpinning={isTesting}
+          error={saveError}
+          onPress={handleTestPress}
+        >
+          {translate('Test')}
+        </SpinnerErrorButton>
+
+        <Button onPress={onModalClose}>{translate('Cancel')}</Button>
+
+        <SpinnerErrorButton
+          isSpinning={isSaving}
+          error={saveError}
+          onPress={handleSavePress}
+        >
+          {translate('Save')}
+        </SpinnerErrorButton>
+      </ModalFooter>
+    </ModalContent>
+  );
+}
+
+export default EditNotificationModalContent;

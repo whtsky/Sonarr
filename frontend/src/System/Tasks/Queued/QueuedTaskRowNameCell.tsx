@@ -1,10 +1,26 @@
 import React from 'react';
-import { useSelector } from 'react-redux';
 import { CommandBody } from 'Commands/Command';
 import TableRowCell from 'Components/Table/Cells/TableRowCell';
-import createMultiSeriesSelector from 'Store/Selectors/createMultiSeriesSelector';
+import { useMultipleSeries } from 'Series/useSeries';
+import sortByProp from 'Utilities/Array/sortByProp';
 import translate from 'Utilities/String/translate';
-import styles from './QueuedTaskRowNameCell.css';
+import styles from './QueuedTaskRowNameCell.module.css';
+
+function formatTitles(titles: string[]) {
+  if (!titles) {
+    return null;
+  }
+
+  if (titles.length > 11) {
+    return (
+      <span title={titles.join(', ')}>
+        {titles.slice(0, 10).join(', ')}, {titles.length - 10} more
+      </span>
+    );
+  }
+
+  return <span>{titles.join(', ')}</span>;
+}
 
 export interface QueuedTaskRowNameCellProps {
   commandName: string;
@@ -16,25 +32,23 @@ export default function QueuedTaskRowNameCell(
   props: QueuedTaskRowNameCellProps
 ) {
   const { commandName, body, clientUserAgent } = props;
-  const seriesIds = [...(body.seriesIds ?? [])];
+  const seriesIds = 'seriesIds' in body ? [...body.seriesIds] : [];
 
-  if (body.seriesId) {
+  if ('seriesId' in body && body.seriesId) {
     seriesIds.push(body.seriesId);
   }
 
-  const series = useSelector(createMultiSeriesSelector(seriesIds));
-  const sortedSeries = series.sort((a, b) =>
-    a.sortTitle.localeCompare(b.sortTitle)
-  );
+  const series = useMultipleSeries(seriesIds);
+  const sortedSeries = series.sort(sortByProp('sortTitle'));
 
   return (
     <TableRowCell>
       <span className={styles.commandName}>
         {commandName}
         {sortedSeries.length ? (
-          <span> - {sortedSeries.map((s) => s.title).join(', ')}</span>
+          <span> - {formatTitles(sortedSeries.map((s) => s.title))}</span>
         ) : null}
-        {body.seasonNumber ? (
+        {'seasonNumber' in body && body.seasonNumber ? (
           <span>
             {' '}
             {translate('SeasonNumberToken', {

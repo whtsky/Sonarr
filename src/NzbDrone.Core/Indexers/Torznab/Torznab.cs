@@ -10,7 +10,6 @@ using NzbDrone.Core.Configuration;
 using NzbDrone.Core.Indexers.Newznab;
 using NzbDrone.Core.Localization;
 using NzbDrone.Core.Parser;
-using NzbDrone.Core.ThingiProvider;
 using NzbDrone.Core.Validation;
 
 namespace NzbDrone.Core.Indexers.Torznab
@@ -22,6 +21,7 @@ namespace NzbDrone.Core.Indexers.Torznab
         public override string Name => "Torznab";
 
         public override DownloadProtocol Protocol => DownloadProtocol.Torrent;
+        public override IEnumerable<FailDownloads> DefaultFailDownloads => [FailDownloads.Executables, FailDownloads.PotentiallyDangerous];
         public override int PageSize => GetProviderPageSize();
 
         public Torznab(INewznabCapabilitiesProvider capabilitiesProvider, IHttpClient httpClient, IIndexerStatusService indexerStatusService, IConfigService configService, IParsingService parsingService, Logger logger, ILocalizationService localizationService)
@@ -43,14 +43,6 @@ namespace NzbDrone.Core.Indexers.Torznab
         public override IParseIndexerResponse GetParser()
         {
             return new TorznabRssParser();
-        }
-
-        public override IEnumerable<ProviderDefinition> DefaultDefinitions
-        {
-            get
-            {
-                yield return GetDefinition("AnimeTosho Torrents", GetSettings("https://feed.animetosho.org", apiPath: @"/nabapi", categories: Array.Empty<int>(), animeCategories: new[] { 5070 }));
-            }
         }
 
         private IndexerDefinition GetDefinition(string name, TorznabSettings settings)
@@ -176,7 +168,10 @@ namespace NzbDrone.Core.Indexers.Torznab
         {
             try
             {
-                return Math.Min(100, Math.Max(_capabilitiesProvider.GetCapabilities(Settings).DefaultPageSize, _capabilitiesProvider.GetCapabilities(Settings).MaxPageSize));
+                return Math.Clamp(
+                    _capabilitiesProvider.GetCapabilities(Settings).DefaultPageSize,
+                    Math.Min(100, _capabilitiesProvider.GetCapabilities(Settings).MaxPageSize),
+                    _capabilitiesProvider.GetCapabilities(Settings).MaxPageSize);
             }
             catch
             {

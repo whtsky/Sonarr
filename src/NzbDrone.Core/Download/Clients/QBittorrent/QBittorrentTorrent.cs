@@ -24,8 +24,11 @@ namespace NzbDrone.Core.Download.Clients.QBittorrent
         [JsonProperty(PropertyName = "save_path")]
         public string SavePath { get; set; } // Torrent save path
 
+        [JsonProperty(PropertyName = "root_path")]
+        public string RootPath { get; set; } // Torrent root folder (qBittorrent 5.0+). Empty when the torrent has no root folder.
+
         [JsonProperty(PropertyName = "content_path")]
-        public string ContentPath { get; set; } // Torrent save path
+        public string ContentPath { get; set; } // Torrent content path (folder, or the file for a single-file torrent)
 
         public float Ratio { get; set; } // Torrent share ratio
 
@@ -37,6 +40,12 @@ namespace NzbDrone.Core.Download.Clients.QBittorrent
 
         [JsonProperty(PropertyName = "seeding_time_limit")] // Per torrent seeding time limit (-2 = use global, -1 = unlimited)
         public long SeedingTimeLimit { get; set; } = -2;
+
+        [JsonProperty(PropertyName = "inactive_seeding_time_limit")] // Per torrent inactive seeding time limit (-2 = use global, -1 = unlimited)
+        public long InactiveSeedingTimeLimit { get; set; } = -2;
+
+        [JsonProperty(PropertyName = "last_activity")] // Timestamp in unix seconds when a chunk was last downloaded/uploaded
+        public long LastActivity { get; set; }
     }
 
     public class QBittorrentTorrentProperties

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using NzbDrone.Core.Datastore;
 using NzbDrone.Core.Messaging.Events;
@@ -40,11 +41,46 @@ namespace NzbDrone.Core.Blocklisting
             Delete(x => seriesIds.Contains(x.SeriesId));
         }
 
-        protected override SqlBuilder PagedBuilder() => new SqlBuilder(_database.DatabaseType).Join<Blocklist, Series>((b, m) => b.SeriesId == m.Id);
-        protected override IEnumerable<Blocklist> PagedQuery(SqlBuilder sql) => _database.QueryJoined<Blocklist, Series>(sql, (bl, movie) =>
-                    {
-                        bl.Series = movie;
-                        return bl;
-                    });
+        public override PagingSpec<Blocklist> GetPaged(PagingSpec<Blocklist> pagingSpec)
+        {
+            var sortingByQuality = string.Equals(pagingSpec.SortKey, "quality", StringComparison.OrdinalIgnoreCase);
+            var customSortExpression = sortingByQuality ? "COALESCE(\"r\".\"Score\", -1)" : null;
+
+            pagingSpec.Records = GetPagedRecords(PagedBuilder(sortingByQuality), pagingSpec, PagedQuery, customSortExpression);
+
+            var countTemplate = $"SELECT COUNT(*) FROM (SELECT /**select**/ FROM \"{TableMapping.Mapper.TableNameMapping(typeof(Blocklist))}\" /**join**/ /**innerjoin**/ /**leftjoin**/ /**where**/ /**groupby**/ /**having**/) AS \"Inner\"";
+            pagingSpec.TotalRecords = GetPagedRecordCount(PagedBuilder(sortingByQuality).Select(typeof(Blocklist)), pagingSpec, countTemplate);
+
+            return pagingSpec;
+        }
+
+        protected override SqlBuilder PagedBuilder() => PagedBuilder(false);
+
+        private SqlBuilder PagedBuilder(bool joinQualityRanks)
+        {
+            var builder = Builder()
+                .Join<Blocklist, Series>((b, m) => b.SeriesId == m.Id);
+
+            if (joinQualityRanks)
+            {
+                var qualityIdExpr = _database.DatabaseType == DatabaseType.PostgreSQL
+                    ? "(\"Blocklist\".\"Quality\"::jsonb ->> 'quality')::int"
+                    : "json_extract(\"Blocklist\".\"Quality\", '$.quality')";
+
+                builder.LeftJoin(
+                    $"\"QualityProfileQualityRanks\" AS \"r\" " +
+                    $"ON \"r\".\"ProfileId\" = \"Series\".\"QualityProfileId\" " +
+                    $"AND \"r\".\"QualityId\" = {qualityIdExpr}");
+            }
+
+            return builder;
+        }
+
+        protected override IEnumerable<Blocklist> PagedQuery(SqlBuilder builder) =>
+            _database.QueryJoined<Blocklist, Series>(builder, (blocklist, series) =>
+            {
+                blocklist.Series = series;
+                return blocklist;
+            });
     }
 }

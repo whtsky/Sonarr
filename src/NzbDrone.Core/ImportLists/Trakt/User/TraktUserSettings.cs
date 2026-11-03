@@ -1,22 +1,28 @@
 using FluentValidation;
+using NzbDrone.Common.Extensions;
 using NzbDrone.Core.Annotations;
+using NzbDrone.Core.Validation;
 
 namespace NzbDrone.Core.ImportLists.Trakt.User
 {
     public class TraktUserSettingsValidator : TraktSettingsBaseValidator<TraktUserSettings>
     {
         public TraktUserSettingsValidator()
-        : base()
         {
             RuleFor(c => c.TraktListType).NotNull();
             RuleFor(c => c.TraktWatchedListType).NotNull();
             RuleFor(c => c.AuthUser).NotEmpty();
+
+            RuleFor(c => c.Years)
+                .Must(BeValidYearRange)
+                .When(c => c.Years.IsNotNullOrWhiteSpace())
+                .WithMessage("Not a valid year or range of years");
         }
     }
 
     public class TraktUserSettings : TraktSettingsBase<TraktUserSettings>
     {
-        protected override AbstractValidator<TraktUserSettings> Validator => new TraktUserSettingsValidator();
+        private static readonly TraktUserSettingsValidator Validator = new();
 
         public TraktUserSettings()
         {
@@ -28,14 +34,22 @@ namespace NzbDrone.Core.ImportLists.Trakt.User
         [FieldDefinition(1, Label = "ImportListsTraktSettingsListType", Type = FieldType.Select, SelectOptions = typeof(TraktUserListType), HelpText = "ImportListsTraktSettingsListTypeHelpText")]
         public int TraktListType { get; set; }
 
-        [FieldDefinition(2, Label = "ImportListsTraktSettingsWatchedListFilter", Type = FieldType.Select, SelectOptions = typeof(TraktUserWatchedListType), HelpText = "ImportListsTraktSettingsWatchedListFilterHelpText")]
+        [FieldDefinition(2, Label = "ImportListsTraktSettingsWatchedListFilter", Type = FieldType.Select, SelectOptions = typeof(TraktUserWatchedListType), HelpText = "ImportListsTraktSettingsWatchedListFilterSeriesHelpText")]
         public int TraktWatchedListType { get; set; }
 
-        [FieldDefinition(3, Label = "ImportListsTraktSettingsWatchedListSorting", Type = FieldType.Select, SelectOptions = typeof(TraktUserWatchSorting), HelpText = "ImportListsTraktSettingsWatchedListSortingHelpText")]
+        [FieldDefinition(3, Label = "ImportListsTraktSettingsWatchListSorting", Type = FieldType.Select, SelectOptions = typeof(TraktUserWatchSorting), HelpText = "ImportListsTraktSettingsWatchListSortingHelpText")]
         public int TraktWatchSorting { get; set; }
 
         [FieldDefinition(4, Label = "Username", HelpText = "ImportListsTraktSettingsUserListUsernameHelpText")]
         public string Username { get; set; }
+
+        [FieldDefinition(5, Label = "ImportListsTraktSettingsYears", HelpText = "ImportListsTraktSettingsYearsSeriesHelpText")]
+        public string Years { get; set; }
+
+        public override NzbDroneValidationResult Validate()
+        {
+            return new NzbDroneValidationResult(Validator.Validate(this));
+        }
     }
 
     public enum TraktUserWatchSorting

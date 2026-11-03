@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Net;
 using FluentValidation.Results;
 using NLog;
@@ -37,6 +38,13 @@ namespace NzbDrone.Core.Notifications.Trakt
         {
             RefreshTokenIfNecessary();
             AddEpisodeToCollection(Settings, message.Series, message.EpisodeFile);
+        }
+
+        public override void OnImportComplete(ImportCompleteMessage message)
+        {
+            RefreshTokenIfNecessary();
+
+            message.EpisodeFiles.ForEach(f => AddEpisodeToCollection(Settings, message.Series, f));
         }
 
         public override void OnEpisodeFileDelete(EpisodeDeleteMessage deleteMessage)
@@ -337,7 +345,7 @@ namespace NzbDrone.Core.Notifications.Trakt
 
         private string MapAudio(EpisodeFile episodeFile)
         {
-            var audioCodec = episodeFile.MediaInfo != null ? MediaInfoFormatter.FormatAudioCodec(episodeFile.MediaInfo, episodeFile.SceneName) : string.Empty;
+            var audioCodec = episodeFile.MediaInfo is { PrimaryAudioStream: not null } ? MediaInfoFormatter.FormatAudioCodec(episodeFile.MediaInfo.PrimaryAudioStream, episodeFile.SceneName) : string.Empty;
 
             var traktAudioFormat = audioCodec switch
             {
@@ -367,9 +375,14 @@ namespace NzbDrone.Core.Notifications.Trakt
 
         private string MapAudioChannels(EpisodeFile episodeFile, string audioFormat)
         {
-            var audioChannels = episodeFile.MediaInfo != null ? MediaInfoFormatter.FormatAudioChannels(episodeFile.MediaInfo).ToString("0.0") : string.Empty;
+            if (episodeFile.MediaInfo is not { PrimaryAudioStream: not null })
+            {
+                return string.Empty;
+            }
 
-            return audioChannels;
+            var audioChannels = MediaInfoFormatter.FormatAudioChannels(episodeFile.MediaInfo.PrimaryAudioStream);
+
+            return audioChannels == 0 ? string.Empty : audioChannels.ToString("0.0", CultureInfo.InvariantCulture);
         }
     }
 }

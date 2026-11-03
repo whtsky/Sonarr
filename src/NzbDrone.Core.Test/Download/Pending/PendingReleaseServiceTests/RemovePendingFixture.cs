@@ -5,6 +5,8 @@ using Moq;
 using NUnit.Framework;
 using NzbDrone.Common.Crypto;
 using NzbDrone.Core.Download.Pending;
+using NzbDrone.Core.Lifecycle;
+using NzbDrone.Core.Messaging.Events;
 using NzbDrone.Core.Parser;
 using NzbDrone.Core.Parser.Model;
 using NzbDrone.Core.Test.Framework;
@@ -57,9 +59,14 @@ namespace NzbDrone.Core.Test.Download.Pending.PendingReleaseServiceTests
              {
                  Id = id,
                  Title = "Series.Title.S01E05.abc-Sonarr",
-                 ParsedEpisodeInfo = new ParsedEpisodeInfo { SeasonNumber = seasonNumber, EpisodeNumbers = episodes },
+                 ParsedEpisodeInfo = new ParsedEpisodeInfo { SeasonNumbers = [seasonNumber], EpisodeNumbers = episodes },
                  Release = Builder<ReleaseInfo>.CreateNew().Build()
              });
+        }
+
+        private void InitializeReleases()
+        {
+            Subject.Handle(new ApplicationStartedEvent());
         }
 
         [Test]
@@ -67,8 +74,9 @@ namespace NzbDrone.Core.Test.Download.Pending.PendingReleaseServiceTests
         {
             AddPending(id: 1, seasonNumber: 2, episodes: new[] { 3 });
 
-            var queueId = HashConverter.GetHashInt31(string.Format("pending-{0}-ep{1}", 1, _episode.Id));
+            var queueId = HashConverter.GetHashInt31($"pending-{1}");
 
+            InitializeReleases();
             Subject.RemovePendingQueueItems(queueId);
 
             AssertRemoved(1);
@@ -82,8 +90,9 @@ namespace NzbDrone.Core.Test.Download.Pending.PendingReleaseServiceTests
             AddPending(id: 3, seasonNumber: 2, episodes: new[] { 3 });
             AddPending(id: 4, seasonNumber: 2, episodes: new[] { 3 });
 
-            var queueId = HashConverter.GetHashInt31(string.Format("pending-{0}-ep{1}", 3, _episode.Id));
+            var queueId = HashConverter.GetHashInt31($"pending-{3}");
 
+            InitializeReleases();
             Subject.RemovePendingQueueItems(queueId);
 
             AssertRemoved(3, 4);
@@ -97,8 +106,9 @@ namespace NzbDrone.Core.Test.Download.Pending.PendingReleaseServiceTests
             AddPending(id: 3, seasonNumber: 3, episodes: new[] { 1 });
             AddPending(id: 4, seasonNumber: 3, episodes: new[] { 1 });
 
-            var queueId = HashConverter.GetHashInt31(string.Format("pending-{0}-ep{1}", 1, _episode.Id));
+            var queueId = HashConverter.GetHashInt31($"pending-{1}");
 
+            InitializeReleases();
             Subject.RemovePendingQueueItems(queueId);
 
             AssertRemoved(1, 2);
@@ -112,8 +122,9 @@ namespace NzbDrone.Core.Test.Download.Pending.PendingReleaseServiceTests
             AddPending(id: 3, seasonNumber: 2, episodes: new[] { 2 });
             AddPending(id: 4, seasonNumber: 2, episodes: new[] { 3 });
 
-            var queueId = HashConverter.GetHashInt31(string.Format("pending-{0}-ep{1}", 1, _episode.Id));
+            var queueId = HashConverter.GetHashInt31($"pending-{1}");
 
+            InitializeReleases();
             Subject.RemovePendingQueueItems(queueId);
 
             AssertRemoved(1, 2);
@@ -125,8 +136,9 @@ namespace NzbDrone.Core.Test.Download.Pending.PendingReleaseServiceTests
             AddPending(id: 1, seasonNumber: 2, episodes: new[] { 1 });
             AddPending(id: 2, seasonNumber: 2, episodes: new[] { 1, 2 });
 
-            var queueId = HashConverter.GetHashInt31(string.Format("pending-{0}-ep{1}", 1, _episode.Id));
+            var queueId = HashConverter.GetHashInt31($"pending-{1}");
 
+            InitializeReleases();
             Subject.RemovePendingQueueItems(queueId);
 
             AssertRemoved(1);
@@ -138,8 +150,9 @@ namespace NzbDrone.Core.Test.Download.Pending.PendingReleaseServiceTests
             AddPending(id: 1, seasonNumber: 2, episodes: new[] { 1 });
             AddPending(id: 2, seasonNumber: 2, episodes: new[] { 1, 2 });
 
-            var queueId = HashConverter.GetHashInt31(string.Format("pending-{0}-ep{1}", 2, _episode.Id));
+            var queueId = HashConverter.GetHashInt31($"pending-{2}");
 
+            InitializeReleases();
             Subject.RemovePendingQueueItems(queueId);
 
             AssertRemoved(2);
@@ -148,6 +161,9 @@ namespace NzbDrone.Core.Test.Download.Pending.PendingReleaseServiceTests
         private void AssertRemoved(params int[] ids)
         {
             Mocker.GetMock<IPendingReleaseRepository>().Verify(c => c.DeleteMany(It.Is<IEnumerable<int>>(s => s.SequenceEqual(ids))));
+
+            Mocker.GetMock<IEventAggregator>()
+                .Verify(v => v.PublishEvent(It.IsAny<PendingReleasesUpdatedEvent>()), Times.Exactly(2));
         }
     }
 }

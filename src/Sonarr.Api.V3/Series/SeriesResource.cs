@@ -32,13 +32,18 @@ namespace Sonarr.Api.V3.Series
         public string Network { get; set; }
         public string AirTime { get; set; }
         public List<MediaCover> Images { get; set; }
+        public Language Language { get; set; }
         public Language OriginalLanguage { get; set; }
         public string RemotePoster { get; set; }
+        public string SeasonType { get; set; }
         public List<SeasonResource> Seasons { get; set; }
+        public List<SeasonTypeResource> SeasonTypes { get; set; }
+        public List<SeriesTranslationResource> Translations { get; set; }
         public int Year { get; set; }
 
         // View & Edit
         public string Path { get; set; }
+        public string PendingPath { get; set; }
         public int QualityProfileId { get; set; }
 
         // Editing Only
@@ -51,14 +56,18 @@ namespace Sonarr.Api.V3.Series
         public int TvdbId { get; set; }
         public int TvRageId { get; set; }
         public int TvMazeId { get; set; }
+        public int TmdbId { get; set; }
         public DateTime? FirstAired { get; set; }
         public DateTime? LastAired { get; set; }
         public SeriesTypes SeriesType { get; set; }
         public string CleanTitle { get; set; }
+        public string OriginalTitle { get; set; }
+        public string CleanOriginalTitle { get; set; }
         public string ImdbId { get; set; }
         public string TitleSlug { get; set; }
         public string RootFolderPath { get; set; }
         public string Folder { get; set; }
+        public List<SeriesFolderResource> Folders { get; set; }
         public string Certification { get; set; }
         public List<string> Genres { get; set; }
         public HashSet<int> Tags { get; set; }
@@ -107,11 +116,14 @@ namespace Sonarr.Api.V3.Series
                        // JsonClone
                        Images = model.Images.JsonClone(),
 
+                       SeasonType = model.SeasonType,
                        Seasons = model.Seasons.ToResource(includeSeasonImages),
+                       SeasonTypes = model.SeasonTypes.ToResource(),
                        Year = model.Year,
                        OriginalLanguage = model.OriginalLanguage,
 
                        Path = model.Path,
+                       PendingPath = model.PendingPath,
                        QualityProfileId = model.QualityProfileId,
 
                        SeasonFolder = model.SeasonFolder,
@@ -123,10 +135,14 @@ namespace Sonarr.Api.V3.Series
                        TvdbId = model.TvdbId,
                        TvRageId = model.TvRageId,
                        TvMazeId = model.TvMazeId,
+                       TmdbId = model.TmdbId,
                        FirstAired = model.FirstAired,
                        LastAired = model.LastAired,
                        SeriesType = model.SeriesType,
                        CleanTitle = model.CleanTitle,
+                       OriginalTitle = model.OriginalTitle,
+                       CleanOriginalTitle = model.CleanOriginalTitle,
+                       Translations = model.Translations?.ToResource() ?? new List<SeriesTranslationResource>(),
                        ImdbId = model.ImdbId,
                        TitleSlug = model.TitleSlug,
 
@@ -138,7 +154,8 @@ namespace Sonarr.Api.V3.Series
                        Tags = model.Tags,
                        Added = model.Added,
                        AddOptions = model.AddOptions,
-                       Ratings = model.Ratings
+                       Ratings = model.Ratings,
+                       Language = model.Language
                    };
         }
 
@@ -171,7 +188,10 @@ namespace Sonarr.Api.V3.Series
                        AirTime = resource.AirTime,
                        Images = resource.Images,
 
+                       SeasonType = resource.SeasonType ?? SeasonType.Official,
                        Seasons = resource.Seasons?.ToModel() ?? new List<Season>(),
+                       SeasonTypes = resource.SeasonTypes?.ToModel() ?? new List<SeasonType>(),
+                       Translations = resource.Translations?.ToModel() ?? new List<SeriesTranslation>(),
                        Year = resource.Year,
                        OriginalLanguage = resource.OriginalLanguage,
 
@@ -187,9 +207,12 @@ namespace Sonarr.Api.V3.Series
                        TvdbId = resource.TvdbId,
                        TvRageId = resource.TvRageId,
                        TvMazeId = resource.TvMazeId,
+                       TmdbId = resource.TmdbId,
                        FirstAired = resource.FirstAired,
                        SeriesType = resource.SeriesType,
                        CleanTitle = resource.CleanTitle,
+                       OriginalTitle = resource.OriginalTitle,
+                       CleanOriginalTitle = resource.CleanOriginalTitle,
                        ImdbId = resource.ImdbId,
                        TitleSlug = resource.TitleSlug,
                        RootFolderPath = resource.RootFolderPath,
@@ -198,7 +221,8 @@ namespace Sonarr.Api.V3.Series
                        Tags = resource.Tags,
                        Added = resource.Added,
                        AddOptions = resource.AddOptions,
-                       Ratings = resource.Ratings
+                       Ratings = resource.Ratings,
+                       Language = resource.Language ?? Language.English
                    };
         }
 

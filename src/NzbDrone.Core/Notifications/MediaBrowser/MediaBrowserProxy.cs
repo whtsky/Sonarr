@@ -19,11 +19,21 @@ namespace NzbDrone.Core.Notifications.Emby
             _logger = logger;
         }
 
+        public void TestConnection(MediaBrowserSettings settings)
+        {
+            var path = "/System/Configuration";
+            var request = BuildRequest(path, settings).Build();
+
+            var response = _httpClient.Get(request);
+            _logger.Trace("Response: {0}", response.Content);
+        }
+
         public void Notify(MediaBrowserSettings settings, string title, string message)
         {
             var path = "/Notifications/Admin";
-            var request = BuildRequest(path, settings);
+            var request = BuildRequest(path, settings).Build();
             request.Headers.ContentType = "application/json";
+            request.LogHttpError = false;
 
             request.SetContent(new
                            {
@@ -32,17 +42,14 @@ namespace NzbDrone.Core.Notifications.Emby
                                ImageUrl = "https://raw.github.com/Sonarr/Sonarr/develop/Logo/64.png"
                            }.ToJson());
 
-            ProcessRequest(request, settings);
+            ProcessRequest(request);
         }
 
         public HashSet<string> GetPaths(MediaBrowserSettings settings, Series series)
         {
             var path = "/Items";
-            var url = GetUrl(settings);
 
-            // NameStartsWith uses the sort title, which is not the series title
-            var request = new HttpRequestBuilder(url)
-                .Resource(path)
+            var request = BuildRequest(path, settings)
                 .AddQueryParam("recursive", "true")
                 .AddQueryParam("includeItemTypes", "Series")
                 .AddQueryParam("fields", "Path,ProviderIds")
@@ -51,7 +58,7 @@ namespace NzbDrone.Core.Notifications.Emby
 
             try
             {
-                var paths = ProcessGetRequest<MediaBrowserItems>(request, settings).Items.GroupBy(item =>
+                var paths = ProcessGetRequest<MediaBrowserItems>(request).Items.GroupBy(item =>
                 {
                     if (item is { ProviderIds.Tvdb: int tvdbid } && tvdbid != 0 && tvdbid == series.TvdbId)
                     {
@@ -68,6 +75,11 @@ namespace NzbDrone.Core.Notifications.Emby
                         return MediaBrowserMatchQuality.Id;
                     }
 
+                    if (item is { ProviderIds.Tmdb: int tmdbid } && tmdbid != 0 && tmdbid == series.TmdbId)
+                    {
+                        return MediaBrowserMatchQuality.Id;
+                    }
+
                     if (item is { ProviderIds.TvRage: int tvrageid } && tvrageid != 0 && tvrageid == series.TvRageId)
                     {
                         return MediaBrowserMatchQuality.Id;
@@ -79,7 +91,8 @@ namespace NzbDrone.Core.Notifications.Emby
                     }
 
                     return MediaBrowserMatchQuality.None;
-                }, item => item.Path).OrderBy(group => (int)group.Key).First();
+                },
+                    item => item.Path).OrderBy(group => (int)group.Key).First();
 
                 if (paths.Key == MediaBrowserMatchQuality.None)
                 {
@@ -103,7 +116,7 @@ namespace NzbDrone.Core.Notifications.Emby
         public void Update(MediaBrowserSettings settings, string seriesPath, string updateType)
         {
             var path = "/Library/Media/Updated";
-            var request = BuildRequest(path, settings);
+            var request = BuildRequest(path, settings).Build();
             request.Headers.ContentType = "application/json";
 
             request.SetContent(new
@@ -118,14 +131,12 @@ namespace NzbDrone.Core.Notifications.Emby
                 }
             }.ToJson());
 
-            ProcessRequest(request, settings);
+            ProcessRequest(request);
         }
 
-        private T ProcessGetRequest<T>(HttpRequest request, MediaBrowserSettings settings)
+        private T ProcessGetRequest<T>(HttpRequest request)
             where T : new()
         {
-            request.Headers.Add("X-MediaBrowser-Token", settings.ApiKey);
-
             var response = _httpClient.Get<T>(request);
             _logger.Trace("Response: {0}", response.Content);
 
@@ -134,10 +145,8 @@ namespace NzbDrone.Core.Notifications.Emby
             return response.Resource;
         }
 
-        private string ProcessRequest(HttpRequest request, MediaBrowserSettings settings)
+        private string ProcessRequest(HttpRequest request)
         {
-            request.Headers.Add("X-MediaBrowser-Token", settings.ApiKey);
-
             var response = _httpClient.Post(request);
             _logger.Trace("Response: {0}", response.Content);
 
@@ -152,11 +161,15 @@ namespace NzbDrone.Core.Notifications.Emby
             return $@"{scheme}://{settings.Address}";
         }
 
-        private HttpRequest BuildRequest(string path, MediaBrowserSettings settings)
+        private HttpRequestBuilder BuildRequest(string path, MediaBrowserSettings settings)
         {
             var url = GetUrl(settings);
+            var request = new HttpRequestBuilder(url).Resource(path);
 
-            return new HttpRequestBuilder(url).Resource(path).Build();
+            request.Headers.Add("X-MediaBrowser-Token", settings.ApiKey);
+            request.Headers.Add("Authorization", $"MediaBrowser Token=\"{settings.ApiKey}\"");
+
+            return request;
         }
 
         private void CheckForError(HttpResponse response)

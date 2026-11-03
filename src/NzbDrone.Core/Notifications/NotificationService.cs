@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using NLog;
 using NzbDrone.Common.Extensions;
@@ -7,6 +8,7 @@ using NzbDrone.Core.Download;
 using NzbDrone.Core.HealthCheck;
 using NzbDrone.Core.MediaFiles.Events;
 using NzbDrone.Core.Messaging.Events;
+using NzbDrone.Core.Parser;
 using NzbDrone.Core.Qualities;
 using NzbDrone.Core.ThingiProvider;
 using NzbDrone.Core.Tv;
@@ -18,6 +20,8 @@ namespace NzbDrone.Core.Notifications
     public class NotificationService
         : IHandle<EpisodeGrabbedEvent>,
           IHandle<EpisodeImportedEvent>,
+          IHandle<DownloadCompletedEvent>,
+          IHandle<UntrackedDownloadCompletedEvent>,
           IHandle<SeriesRenamedEvent>,
           IHandle<SeriesAddCompletedEvent>,
           IHandle<SeriesDeletedEvent>,
@@ -44,6 +48,41 @@ namespace NzbDrone.Core.Notifications
 
         private string GetMessage(Series series, List<Episode> episodes, QualityModel quality)
         {
+            var qualityString = GetQualityString(series, quality);
+
+            if (episodes.Empty())
+            {
+                return $"{series.Title} - [{qualityString}]";
+            }
+
+            if (series.SeriesType == SeriesTypes.Daily)
+            {
+                var episode = episodes.First();
+
+                return $"{series.Title} - {episode.AirDate} - {episode.Title} [{qualityString}]";
+            }
+
+            if (episodes.Select(e => e.SeasonNumber).Distinct().Count() > 1)
+            {
+                return GetFullSeasonMessage(series, episodes, quality);
+            }
+
+            var episodeNumbers = string.Concat(episodes.Select(e => $"x{e.EpisodeNumber:00}"));
+
+            var episodeTitles = string.Join(" + ", episodes.Select(e => e.Title));
+
+            return $"{series.Title} - {episodes.First().SeasonNumber}{episodeNumbers} - {episodeTitles} [{qualityString}]";
+        }
+
+        private string GetFullSeasonMessage(Series series, List<Episode> episodes, QualityModel quality)
+        {
+            var qualityString = GetQualityString(series, quality);
+
+            return $"{series.Title} - {SeasonNumbersFormatter.Format(episodes.Select(e => e.SeasonNumber))} [{qualityString}]";
+        }
+
+        private string GetQualityString(Series series, QualityModel quality)
+        {
             var qualityString = quality.Quality.ToString();
 
             if (quality.Revision.Version > 1)
@@ -58,28 +97,7 @@ namespace NzbDrone.Core.Notifications
                 }
             }
 
-            if (series.SeriesType == SeriesTypes.Daily)
-            {
-                var episode = episodes.First();
-
-                return string.Format("{0} - {1} - {2} [{3}]",
-                                         series.Title,
-                                         episode.AirDate,
-                                         episode.Title,
-                                         qualityString);
-            }
-
-            var episodeNumbers = string.Concat(episodes.Select(e => e.EpisodeNumber)
-                                                       .Select(i => string.Format("x{0:00}", i)));
-
-            var episodeTitles = string.Join(" + ", episodes.Select(e => e.Title));
-
-            return string.Format("{0} - {1}{2} - {3} [{4}]",
-                                    series.Title,
-                                    episodes.First().SeasonNumber,
-                                    episodeNumbers,
-                                    episodeTitles,
-                                    qualityString);
+            return qualityString;
         }
 
         private bool ShouldHandleSeries(ProviderDefinition definition, Series series)
@@ -88,6 +106,12 @@ namespace NzbDrone.Core.Notifications
             {
                 _logger.Debug("No tags set for this notification.");
                 return true;
+            }
+
+            if (series == null)
+            {
+                _logger.Debug("{0} has tags but the series is unknown. Notification will not be sent", definition.Name);
+                return false;
             }
 
             if (definition.Tags.Intersect(series.Tags).Any())
@@ -189,6 +213,92 @@ namespace NzbDrone.Core.Notifications
             }
         }
 
+        public void Handle(DownloadCompletedEvent message)
+        {
+            var series = message.Series;
+            var episodes = message.Episodes;
+            var parsedEpisodeInfo = message.TrackedDownload.RemoteEpisode.ParsedEpisodeInfo;
+
+            var downloadMessage = new ImportCompleteMessage
+            {
+                Message = parsedEpisodeInfo.FullSeason
+                    ? GetFullSeasonMessage(series, episodes, parsedEpisodeInfo.Quality)
+                    : GetMessage(series, episodes, parsedEpisodeInfo.Quality),
+                Series = series,
+                Episodes = episodes,
+                EpisodeFiles = message.EpisodeFiles,
+                DownloadClientInfo = message.TrackedDownload.DownloadItem.DownloadClientInfo,
+                DownloadId = message.TrackedDownload.DownloadItem.DownloadId,
+                Release = message.Release,
+                SourcePath = message.TrackedDownload.DownloadItem.OutputPath.FullPath,
+                DestinationPath = message.EpisodeFiles.Select(e => Path.Join(series.Path, e.RelativePath)).ToList().GetLongestCommonPath(),
+                ReleaseGroup = parsedEpisodeInfo.ReleaseGroup,
+                ReleaseQuality = parsedEpisodeInfo.Quality
+            };
+
+            foreach (var notification in _notificationFactory.OnImportCompleteEnabled())
+            {
+                try
+                {
+                    if (ShouldHandleSeries(notification.Definition, series))
+                    {
+                        if (((NotificationDefinition)notification.Definition).OnImportComplete)
+                        {
+                            notification.OnImportComplete(downloadMessage);
+                            _notificationStatusService.RecordSuccess(notification.Definition.Id);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _notificationStatusService.RecordFailure(notification.Definition.Id);
+                    _logger.Warn(ex, "Unable to send OnImportComplete notification to: " + notification.Definition.Name);
+                }
+            }
+        }
+
+        public void Handle(UntrackedDownloadCompletedEvent message)
+        {
+            var series = message.Series;
+            var episodes = message.Episodes;
+            var parsedEpisodeInfo = message.ParsedEpisodeInfo;
+
+            var downloadMessage = new ImportCompleteMessage
+            {
+                Message = parsedEpisodeInfo.FullSeason
+                    ? GetFullSeasonMessage(series, episodes, parsedEpisodeInfo.Quality)
+                    : GetMessage(series, episodes, parsedEpisodeInfo.Quality),
+                Series = series,
+                Episodes = episodes,
+                EpisodeFiles = message.EpisodeFiles,
+                SourcePath = message.SourcePath,
+                SourceTitle = parsedEpisodeInfo.ReleaseTitle,
+                DestinationPath = message.EpisodeFiles.Select(e => Path.Join(series.Path, e.RelativePath)).ToList().GetLongestCommonPath(),
+                ReleaseGroup = parsedEpisodeInfo.ReleaseGroup,
+                ReleaseQuality = parsedEpisodeInfo.Quality
+            };
+
+            foreach (var notification in _notificationFactory.OnImportCompleteEnabled())
+            {
+                try
+                {
+                    if (ShouldHandleSeries(notification.Definition, series))
+                    {
+                        if (((NotificationDefinition)notification.Definition).OnImportComplete)
+                        {
+                            notification.OnImportComplete(downloadMessage);
+                            _notificationStatusService.RecordSuccess(notification.Definition.Id);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _notificationStatusService.RecordFailure(notification.Definition.Id);
+                    _logger.Warn(ex, "Unable to send OnImportComplete notification to: " + notification.Definition.Name);
+                }
+            }
+        }
+
         public void Handle(SeriesRenamedEvent message)
         {
             foreach (var notification in _notificationFactory.OnRenameEnabled())
@@ -233,7 +343,7 @@ namespace NzbDrone.Core.Notifications
 
         public void Handle(ManualInteractionRequiredEvent message)
         {
-            var series = message.Episode.Series;
+            var series = message.Episode?.Series;
             var mess = "";
 
             if (series != null)
@@ -255,7 +365,7 @@ namespace NzbDrone.Core.Notifications
             {
                 Message = mess,
                 Series = series,
-                Quality = message.Episode.ParsedEpisodeInfo.Quality,
+                Quality = message.Episode?.ParsedEpisodeInfo?.Quality,
                 Episode = message.Episode,
                 TrackedDownload = message.TrackedDownload,
                 DownloadClientInfo = message.TrackedDownload.DownloadItem?.DownloadClientInfo,
@@ -267,7 +377,7 @@ namespace NzbDrone.Core.Notifications
             {
                 try
                 {
-                    if (!ShouldHandleSeries(notification.Definition, message.Episode.Series))
+                    if (!ShouldHandleSeries(notification.Definition, message.Episode?.Series))
                     {
                         continue;
                     }

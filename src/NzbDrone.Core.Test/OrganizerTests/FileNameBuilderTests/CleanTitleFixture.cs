@@ -53,7 +53,7 @@ namespace NzbDrone.Core.Test.OrganizerTests.FileNameBuilderTests
         }
 
         [TestCase("Florence + the Machine", "Florence + the Machine")]
-        [TestCase("Beyoncé X10", "Beyoncé X10")]
+        [TestCase("Beyoncé X10", "Beyonce X10")]
         [TestCase("Girlfriends' Guide to Divorce", "Girlfriends Guide to Divorce")]
         [TestCase("Rule #23: Never Lie to the Kids", "Rule #23 Never Lie to the Kids")]
         [TestCase("Anne Hathaway/Florence + The Machine", "Anne Hathaway Florence + The Machine")]
@@ -72,8 +72,15 @@ namespace NzbDrone.Core.Test.OrganizerTests.FileNameBuilderTests
         [TestCase("I'm the Boss", "Im the Boss")]
         [TestCase("The Title's", "The Title's")]
         [TestCase("I'm after I'm", "Im after I'm")]
-
-        // [TestCase("", "")]
+        [TestCase("I've Been Caught", "Ive Been Caught")]
+        [TestCase("I'm Lost", "Im Lost")]
+        [TestCase("That'll Be The Day", "Thatll Be The Day")]
+        [TestCase("I'd Rather Be Alone", "Id Rather Be Alone")]
+        [TestCase("I Can't Die", "I Cant Die")]
+        [TestCase("Won`t Get Fooled Again", "Wont Get Fooled Again")]
+        [TestCase("Don’t Blink", "Dont Blink")]
+        [TestCase("The ` Legend of Kings", "The Legend of Kings")]
+        [TestCase("Joker: Folie à deux", "Joker Folie a deux")]
         public void should_get_expected_title_back(string title, string expected)
         {
             _series.Title = title;

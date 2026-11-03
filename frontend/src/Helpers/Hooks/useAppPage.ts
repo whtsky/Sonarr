@@ -1,0 +1,121 @@
+import { useMemo } from 'react';
+import { useTranslations } from 'App/useTranslations';
+import useCommands from 'Commands/useCommands';
+import useCustomFilters from 'Filters/useCustomFilters';
+import { useInitializeLanguage } from 'Language/useLanguageName';
+import { useLanguages } from 'Language/useLanguages';
+import useSeries from 'Series/useSeries';
+import useIndexerFlags from 'Settings/Indexers/useIndexerFlags';
+import { useMetadataSourceSettings } from 'Settings/MetadataSource/useMetadataSourceSettings';
+import { useQualityProfiles } from 'Settings/Profiles/Quality/useQualityProfiles';
+import { useUiSettings } from 'Settings/UI/useUiSettings';
+import useSystemStatus from 'System/Status/useSystemStatus';
+import useTags from 'Tags/useTags';
+
+const useAppPage = () => {
+  useCommands();
+
+  const { isInitialized: isLanguageInitialized } = useInitializeLanguage();
+
+  const { isFetched: isCustomFiltersFetched, error: customFiltersError } =
+    useCustomFilters();
+
+  const { isFetched: isSeriesFetched, error: seriesError } = useSeries();
+
+  const { isFetched: isSystemStatusFetched, error: systemStatusError } =
+    useSystemStatus();
+
+  const { isFetched: isTagsFetched, error: tagsError } = useTags();
+
+  const { isFetched: isTranslationsFetched, error: translationsError } =
+    useTranslations();
+
+  const { isFetched: isUiSettingsFetched, error: uiSettingsError } =
+    useUiSettings();
+
+  const { isFetched: isQualityProfilesFetched, error: qualityProfilesError } =
+    useQualityProfiles();
+
+  const { isFetched: isLanguagesFetched, error: languagesError } =
+    useLanguages();
+
+  const { isFetched: isIndexerFlagsFetched, error: indexerFlagsError } =
+    useIndexerFlags();
+
+  const {
+    isFetched: isMetadataSourceSettingsFetched,
+    error: metadataSourceSettingsError,
+  } = useMetadataSourceSettings();
+
+  const isPopulated =
+    isCustomFiltersFetched &&
+    isIndexerFlagsFetched &&
+    isLanguageInitialized &&
+    isSeriesFetched &&
+    isSystemStatusFetched &&
+    isTagsFetched &&
+    isTranslationsFetched &&
+    isUiSettingsFetched &&
+    isQualityProfilesFetched &&
+    isLanguagesFetched &&
+    isMetadataSourceSettingsFetched;
+
+  const { hasError, errors } = useMemo(() => {
+    return {
+      hasError: !!(
+        customFiltersError ||
+        seriesError ||
+        uiSettingsError ||
+        qualityProfilesError ||
+        languagesError ||
+        indexerFlagsError ||
+        systemStatusError ||
+        tagsError ||
+        translationsError ||
+        metadataSourceSettingsError
+      ),
+      errors: {
+        seriesError,
+        customFiltersError,
+        tagsError,
+        uiSettingsError,
+        qualityProfilesError,
+        languagesError,
+        indexerFlagsError,
+        systemStatusError,
+        translationsError,
+        metadataSourceSettingsError,
+      },
+    };
+  }, [
+    customFiltersError,
+    seriesError,
+    uiSettingsError,
+    qualityProfilesError,
+    languagesError,
+    indexerFlagsError,
+    systemStatusError,
+    tagsError,
+    translationsError,
+    metadataSourceSettingsError,
+  ]);
+
+  const isLocalStorageSupported = useMemo(() => {
+    const key = 'sonarrTest';
+
+    try {
+      localStorage.setItem(key, key);
+      localStorage.removeItem(key);
+
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  return useMemo(() => {
+    return { errors, hasError, isLocalStorageSupported, isPopulated };
+  }, [errors, hasError, isLocalStorageSupported, isPopulated]);
+};
+
+export default useAppPage;

@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using FluentValidation;
 using NzbDrone.Core.Annotations;
-using NzbDrone.Core.ThingiProvider;
 using NzbDrone.Core.Validation;
 
 namespace NzbDrone.Core.Notifications.Email
@@ -26,9 +25,9 @@ namespace NzbDrone.Core.Notifications.Email
         }
     }
 
-    public class EmailSettings : IProviderConfig
+    public class EmailSettings : NotificationSettingsBase<EmailSettings>
     {
-        private static readonly EmailSettingsValidator Validator = new EmailSettingsValidator();
+        private static readonly EmailSettingsValidator Validator = new();
 
         public EmailSettings()
         {
@@ -60,13 +59,13 @@ namespace NzbDrone.Core.Notifications.Email
         [FieldDefinition(6, Label = "NotificationsEmailSettingsRecipientAddress", HelpText = "NotificationsEmailSettingsRecipientAddressHelpText")]
         public IEnumerable<string> To { get; set; }
 
-        [FieldDefinition(7, Label = "NotificationsEmailSettingsCcAddress", HelpText = "NotificationsEmailSettingsCcAddressHelpText", Advanced = true)]
+        [FieldDefinition(7, Label = "NotificationsEmailSettingsCcAddress", HelpText = "NotificationsEmailSettingsCcAddressHelpText")]
         public IEnumerable<string> Cc { get; set; }
 
-        [FieldDefinition(8, Label = "NotificationsEmailSettingsBccAddress", HelpText = "NotificationsEmailSettingsBccAddressHelpText", Advanced = true)]
+        [FieldDefinition(8, Label = "NotificationsEmailSettingsBccAddress", HelpText = "NotificationsEmailSettingsBccAddressHelpText")]
         public IEnumerable<string> Bcc { get; set; }
 
-        public NzbDroneValidationResult Validate()
+        public override NzbDroneValidationResult Validate()
         {
             return new NzbDroneValidationResult(Validator.Validate(this));
         }

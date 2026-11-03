@@ -21,6 +21,7 @@ namespace NzbDrone.Test.Common
         private readonly IProcessProvider _processProvider;
         private readonly IRestClient _restClient;
         private Process _nzbDroneProcess;
+        private bool _enableAuth;
 
         public string AppData { get; private set; }
         public string ApiKey { get; private set; }
@@ -38,6 +39,7 @@ namespace NzbDrone.Test.Common
 
         public void Start(bool enableAuth = false)
         {
+            _enableAuth = enableAuth;
             AppData = Path.Combine(TestContext.CurrentContext.TestDirectory, "_intg_" + TestBase.GetUID());
             Directory.CreateDirectory(AppData);
 
@@ -55,7 +57,7 @@ namespace NzbDrone.Test.Common
 
             if (BuildInfo.IsDebug)
             {
-                Start(Path.Combine(TestContext.CurrentContext.TestDirectory, "..", "..", "_output", "net6.0", consoleExe));
+                Start(Path.Combine(TestContext.CurrentContext.TestDirectory, "..", "..", "_output", "net10.0", consoleExe));
             }
             else
             {
@@ -136,7 +138,12 @@ namespace NzbDrone.Test.Common
 
         private void Start(string outputSonarrConsoleExe)
         {
-            StringDictionary envVars = new ();
+            StringDictionary envVars = new();
+            if (!_enableAuth)
+            {
+                envVars.Add("Sonarr__Auth__Method", "None");
+            }
+
             if (PostgresOptions?.Host != null)
             {
                 envVars.Add("Sonarr__Postgres__Host", PostgresOptions.Host);
@@ -180,6 +187,7 @@ namespace NzbDrone.Test.Common
                              new XElement(nameof(ConfigFileProvider.AnalyticsEnabled), false),
                              new XElement(nameof(ConfigFileProvider.AuthenticationMethod), enableAuth ? "Forms" : "None"),
                              new XElement(nameof(ConfigFileProvider.AuthenticationRequired), "DisabledForLocalAddresses"),
+                             new XElement(nameof(ConfigFileProvider.AllowedHosts), "localhost"),
                              new XElement(nameof(ConfigFileProvider.Port), Port)));
 
             var data = xDoc.ToString();
@@ -187,6 +195,26 @@ namespace NzbDrone.Test.Common
             File.WriteAllText(configFile, data);
 
             ApiKey = apiKey;
+        }
+
+        public static void EnsureUiContent()
+        {
+            // Writes a dummy CSS file for testing static resources, since neither debug nor
+            // release builds ship one as part of running the integration tests. Called once
+            // per test assembly via a SetUpFixture so parallel fixtures don't race on the
+            // shared file.
+
+            var contentDirectory = BuildInfo.IsDebug
+                ? Path.Combine(TestContext.CurrentContext.TestDirectory, "..", "..", "_output", "UI", "Content")
+                : Path.Combine(TestContext.CurrentContext.TestDirectory, "bin", "UI", "Content");
+            var stylesPath = Path.Combine(contentDirectory, "styles.css");
+
+            Directory.CreateDirectory(contentDirectory);
+
+            if (!File.Exists(stylesPath))
+            {
+                File.WriteAllText(stylesPath, ".test { display: flex; }");
+            }
         }
     }
 }

@@ -1,6 +1,8 @@
+using System;
 using System.IO;
 using NLog;
 using NzbDrone.Common.Disk;
+using NzbDrone.Common.Extensions;
 using NzbDrone.Common.Instrumentation.Extensions;
 using NzbDrone.Core.Messaging.Commands;
 using NzbDrone.Core.Messaging.Events;
@@ -36,9 +38,26 @@ namespace NzbDrone.Core.Tv
 
         private void MoveSingleSeries(Series series, string sourcePath, string destinationPath, int? index = null, int? total = null)
         {
+            if (!sourcePath.IsPathValid(PathValidationType.CurrentOs))
+            {
+                _logger.Warn("Folder '{0}' for '{1}' is invalid, unable to move series. Try moving files manually", sourcePath, series.Title);
+                UpdatePath(series.Id, destinationPath);
+                return;
+            }
+
             if (!_diskProvider.FolderExists(sourcePath))
             {
-                _logger.Debug("Folder '{0}' for '{1}' does not exist, not moving.", sourcePath, series.Title);
+                if (_diskProvider.FolderExists(destinationPath))
+                {
+                    _logger.Debug("Folder '{0}' for '{1}' does not exist, but '{2}' does, assuming the move already completed.", sourcePath, series.Title, destinationPath);
+                    UpdatePath(series.Id, destinationPath);
+                }
+                else
+                {
+                    _logger.Warn("Folder '{0}' for '{1}' does not exist and '{2}' was not found either, updating the series path anyway. Try moving files manually", sourcePath, series.Title, destinationPath);
+                    UpdatePath(series.Id, destinationPath);
+                }
+
                 return;
             }
 
@@ -51,6 +70,13 @@ namespace NzbDrone.Core.Tv
                 _logger.ProgressInfo("Moving {0} from '{1}' to '{2}'", series.Title, sourcePath, destinationPath);
             }
 
+            if (sourcePath.PathEquals(destinationPath))
+            {
+                _logger.ProgressInfo("{0} is already in the specified location '{1}'.", series, destinationPath);
+                UpdatePath(series.Id, destinationPath);
+                return;
+            }
+
             try
             {
                 // Ensure the parent of the series folder exists, this will often just be the root folder, but
@@ -60,21 +86,29 @@ namespace NzbDrone.Core.Tv
 
                 _logger.ProgressInfo("{0} moved successfully to {1}", series.Title, destinationPath);
 
+                UpdatePath(series.Id, destinationPath);
+
                 _eventAggregator.PublishEvent(new SeriesMovedEvent(series, sourcePath, destinationPath));
             }
             catch (IOException ex)
             {
                 _logger.Error(ex, "Unable to move series from '{0}' to '{1}'. Try moving files manually", sourcePath, destinationPath);
 
-                RevertPath(series.Id, sourcePath);
+                UpdatePath(series.Id, sourcePath);
+            }
+            catch (Exception)
+            {
+                UpdatePath(series.Id, sourcePath);
+                throw;
             }
         }
 
-        private void RevertPath(int seriesId, string path)
+        private void UpdatePath(int seriesId, string path)
         {
             var series = _seriesService.GetSeries(seriesId);
 
             series.Path = path;
+            series.PendingPath = null;
             _seriesService.UpdateSeries(series);
         }
 

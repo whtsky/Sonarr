@@ -1,4 +1,5 @@
 using FluentValidation;
+using NzbDrone.Common.Extensions;
 using NzbDrone.Core.Annotations;
 using NzbDrone.Core.Validation;
 
@@ -10,6 +11,7 @@ namespace NzbDrone.Core.CustomFormats
         {
             RuleFor(c => c.Min).GreaterThanOrEqualTo(0);
             RuleFor(c => c.Max).GreaterThan(c => c.Min);
+            RuleFor(c => c.Max).LessThanOrEqualTo(double.MaxValue);
         }
     }
 

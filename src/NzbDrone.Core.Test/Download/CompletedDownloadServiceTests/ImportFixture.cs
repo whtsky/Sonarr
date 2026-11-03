@@ -1,10 +1,10 @@
 using System.Collections.Generic;
+using System.Linq;
 using FizzWare.NBuilder;
 using FluentAssertions;
 using Moq;
 using NUnit.Framework;
 using NzbDrone.Common.Disk;
-using NzbDrone.Core.DecisionEngine;
 using NzbDrone.Core.Download;
 using NzbDrone.Core.Download.TrackedDownloads;
 using NzbDrone.Core.History;
@@ -71,6 +71,10 @@ namespace NzbDrone.Core.Test.Download.CompletedDownloadServiceTests
             Mocker.GetMock<IProvideImportItemService>()
                   .Setup(s => s.ProvideImportItem(It.IsAny<DownloadClientItem>(), It.IsAny<DownloadClientItem>()))
                   .Returns<DownloadClientItem, DownloadClientItem>((i, p) => i);
+
+            Mocker.GetMock<IEpisodeService>()
+                .Setup(s => s.GetEpisodes(It.IsAny<IEnumerable<int>>()))
+                .Returns(new List<Episode>());
         }
 
         private RemoteEpisode BuildRemoteEpisode()
@@ -102,6 +106,30 @@ namespace NzbDrone.Core.Test.Download.CompletedDownloadServiceTests
                 .Returns(BuildRemoteEpisode().Series);
         }
 
+        private List<Episode> GivenMultiSeasonDownload()
+        {
+            _trackedDownload.DownloadItem.Title = "Drone.S01-S03.1080p.BluRay";
+
+            var episodes = Enumerable.Range(1, 3)
+                .SelectMany(s => Enumerable.Range(1, 2).Select(e => new Episode { Id = (s * 10) + e, SeasonNumber = s, EpisodeNumber = e }))
+                .ToList();
+
+            _trackedDownload.RemoteEpisode.ParsedEpisodeInfo = Parser.Parser.ParseTitle(_trackedDownload.DownloadItem.Title);
+            _trackedDownload.RemoteEpisode.Episodes = episodes;
+
+            return episodes;
+        }
+
+        private void GivenImportedEpisodes(IEnumerable<Episode> episodes)
+        {
+            Mocker.GetMock<IDownloadedEpisodesImportService>()
+                  .Setup(v => v.ProcessPath(It.IsAny<string>(), It.IsAny<ImportMode>(), It.IsAny<Series>(), It.IsAny<DownloadClientItem>()))
+                  .Returns(episodes.Select(e => new ImportResult(
+                          new ImportDecision(
+                              new LocalEpisode { Path = $@"C:\TestPath\Droned.S{e.SeasonNumber:00}E{e.EpisodeNumber:00}.mkv", Episodes = new List<Episode> { e } })))
+                      .ToList());
+        }
+
         private void GivenSeriesMatch()
         {
             Mocker.GetMock<IParsingService>()
@@ -113,17 +141,21 @@ namespace NzbDrone.Core.Test.Download.CompletedDownloadServiceTests
         public void should_not_mark_as_imported_if_all_files_were_rejected()
         {
             Mocker.GetMock<IDownloadedEpisodesImportService>()
-                  .Setup(v => v.ProcessPath(It.IsAny<string>(), It.IsAny<ImportMode>(), It.IsAny<Series>(), It.IsAny<DownloadClientItem>()))
-                  .Returns(new List<ImportResult>
-                           {
-                               new ImportResult(
-                                   new ImportDecision(
-                                       new LocalEpisode { Path = @"C:\TestPath\Droned.S01E01.mkv", Episodes = { _episode1 } }, new Rejection("Rejected!")), "Test Failure"),
+                .Setup(v => v.ProcessPath(It.IsAny<string>(), It.IsAny<ImportMode>(), It.IsAny<Series>(), It.IsAny<DownloadClientItem>()))
+                .Returns(new List<ImportResult>
+                {
+                    new ImportResult(
+                        new ImportDecision(
+                            new LocalEpisode { Path = @"C:\TestPath\Droned.S01E01.mkv", Episodes = { _episode1 } },
+                            new ImportRejection(ImportRejectionReason.Unknown, "Rejected!")),
+                        "Test Failure"),
 
-                               new ImportResult(
-                                   new ImportDecision(
-                                       new LocalEpisode { Path = @"C:\TestPath\Droned.S01E02.mkv", Episodes = { _episode2 } }, new Rejection("Rejected!")), "Test Failure")
-                           });
+                    new ImportResult(
+                        new ImportDecision(
+                            new LocalEpisode { Path = @"C:\TestPath\Droned.S01E02.mkv", Episodes = { _episode2 } },
+                            new ImportRejection(ImportRejectionReason.Unknown, "Rejected!")),
+                        "Test Failure")
+                });
 
             Subject.Import(_trackedDownload);
 
@@ -142,11 +174,13 @@ namespace NzbDrone.Core.Test.Download.CompletedDownloadServiceTests
                            {
                                new ImportResult(
                                    new ImportDecision(
-                                       new LocalEpisode { Path = @"C:\TestPath\Droned.S01E01.mkv", Episodes = { _episode1 } }, new Rejection("Rejected!")), "Test Failure"),
+                                       new LocalEpisode { Path = @"C:\TestPath\Droned.S01E01.mkv", Episodes = { _episode1 } }, new ImportRejection(ImportRejectionReason.Unknown, "Rejected!")),
+                                   "Test Failure"),
 
                                new ImportResult(
                                    new ImportDecision(
-                                       new LocalEpisode { Path = @"C:\TestPath\Droned.S01E02.mkv", Episodes = { _episode2 } }, new Rejection("Rejected!")), "Test Failure")
+                                       new LocalEpisode { Path = @"C:\TestPath\Droned.S01E02.mkv", Episodes = { _episode2 } }, new ImportRejection(ImportRejectionReason.Unknown, "Rejected!")),
+                                   "Test Failure")
                            });
 
             _trackedDownload.RemoteEpisode.Episodes.Clear();
@@ -269,16 +303,24 @@ namespace NzbDrone.Core.Test.Download.CompletedDownloadServiceTests
 
             Mocker.GetMock<IDownloadedEpisodesImportService>()
                 .Setup(v => v.ProcessPath(It.IsAny<string>(), It.IsAny<ImportMode>(), It.IsAny<Series>(), It.IsAny<DownloadClientItem>()))
-                .Returns(new List<ImportResult>
-                {
-                    new ImportResult(
-                        new ImportDecision(
-                            new LocalEpisode { Path = @"C:\TestPath\Droned.S01E01.mkv", Episodes = new List<Episode> { episode1 } })),
+                .Returns(
+                    new List<ImportResult>
+                    {
+                        new ImportResult(
+                            new ImportDecision(
+                                new LocalEpisode
+                                {
+                                    Path = @"C:\TestPath\Droned.S01E01.mkv", Episodes = new List<Episode> { episode1 }
+                                })),
 
-                    new ImportResult(
-                        new ImportDecision(
-                            new LocalEpisode { Path = @"C:\TestPath\Droned.S01E02.mkv", Episodes = new List<Episode> { episode2 } }), "Test Failure")
-                });
+                        new ImportResult(
+                            new ImportDecision(
+                                new LocalEpisode
+                                {
+                                    Path = @"C:\TestPath\Droned.S01E02.mkv", Episodes = new List<Episode> { episode2 }
+                                }),
+                            "Test Failure")
+                    });
 
             var history = Builder<EpisodeHistory>.CreateListOfSize(2)
                                                   .BuildList();
@@ -290,6 +332,32 @@ namespace NzbDrone.Core.Test.Download.CompletedDownloadServiceTests
             Mocker.GetMock<ITrackedDownloadAlreadyImported>()
                   .Setup(s => s.IsImported(It.IsAny<TrackedDownload>(), It.IsAny<List<EpisodeHistory>>()))
                   .Returns(true);
+
+            Subject.Import(_trackedDownload);
+
+            AssertImported();
+        }
+
+        [Test]
+        public void should_not_mark_multi_season_download_as_imported_if_only_first_season_was_imported()
+        {
+            var episodes = GivenMultiSeasonDownload();
+
+            GivenImportedEpisodes(episodes.Where(e => e.SeasonNumber == 1));
+
+            Subject.Import(_trackedDownload);
+
+            AssertNotImported();
+
+            ExceptionVerification.ExpectedWarns(1);
+        }
+
+        [Test]
+        public void should_mark_multi_season_download_as_imported_if_all_seasons_were_imported()
+        {
+            var episodes = GivenMultiSeasonDownload();
+
+            GivenImportedEpisodes(episodes);
 
             Subject.Import(_trackedDownload);
 
@@ -361,12 +429,150 @@ namespace NzbDrone.Core.Test.Download.CompletedDownloadServiceTests
             AssertImported();
         }
 
+        [Test]
+        public void should_block_import_and_publish_manual_interaction_event_for_dangerous_file_that_is_not_failed()
+        {
+            Mocker.GetMock<IDownloadedEpisodesImportService>()
+                  .Setup(v => v.ProcessPath(It.IsAny<string>(), It.IsAny<ImportMode>(), It.IsAny<Series>(), It.IsAny<DownloadClientItem>()))
+                  .Returns(new List<ImportResult>
+                           {
+                               new ImportResult(
+                                   new ImportDecision(
+                                       new LocalEpisode { Path = @"C:\TestPath\Droned.exe", Episodes = { _episode1 } },
+                                       new ImportRejection(ImportRejectionReason.DangerousFile, "Caution: Found potentially dangerous file with extension: .exe")),
+                                   "Caution: Found potentially dangerous file with extension: .exe")
+                           });
+
+            Mocker.GetMock<IRejectedImportService>()
+                  .Setup(s => s.Process(It.IsAny<TrackedDownload>(), It.IsAny<ImportResult>()))
+                  .Callback<TrackedDownload, ImportResult>((td, ir) => td.Warn(new TrackedDownloadStatusMessage(td.DownloadItem.Title, ir.Errors)))
+                  .Returns(true);
+
+            Subject.Import(_trackedDownload);
+
+            _trackedDownload.State.Should().Be(TrackedDownloadState.ImportBlocked);
+
+            Mocker.GetMock<IEventAggregator>()
+                  .Verify(v => v.PublishEvent(It.IsAny<ManualInteractionRequiredEvent>()), Times.Once());
+        }
+
+        [Test]
+        public void should_fail_download_when_nothing_was_imported_and_download_client_reports_a_rejected_file()
+        {
+            GivenNoFilesToImport();
+            GivenDownloadClientFiles("Drone.S01E01.HDTV/Drone.S01E01.HDTV.bat");
+
+            Mocker.GetMock<IRejectedFileExtensionService>()
+                  .Setup(s => s.GetRejection(It.IsAny<IEnumerable<string>>()))
+                  .Returns(new ImportRejection(ImportRejectionReason.ExecutableFile, "Caution: Found executable file with extension: .bat"));
+
+            Mocker.GetMock<IRejectedImportService>()
+                  .Setup(s => s.Process(It.IsAny<TrackedDownload>(), It.IsAny<ImportResult>()))
+                  .Callback<TrackedDownload, ImportResult>((td, _) => td.Fail())
+                  .Returns(true);
+
+            Subject.Import(_trackedDownload);
+
+            _trackedDownload.State.Should().Be(TrackedDownloadState.FailedPending);
+            _trackedDownload.DownloadItem.CanBeRemoved.Should().BeTrue();
+        }
+
+        [Test]
+        public void should_block_import_when_download_client_reports_a_rejected_file_that_is_not_failed()
+        {
+            GivenNoFilesToImport();
+            GivenDownloadClientFiles("Drone.S01E01.HDTV/Drone.S01E01.HDTV.bat");
+
+            Mocker.GetMock<IRejectedFileExtensionService>()
+                  .Setup(s => s.GetRejection(It.IsAny<IEnumerable<string>>()))
+                  .Returns(new ImportRejection(ImportRejectionReason.ExecutableFile, "Caution: Found executable file with extension: .bat"));
+
+            Mocker.GetMock<IRejectedImportService>()
+                  .Setup(s => s.Process(It.IsAny<TrackedDownload>(), It.IsAny<ImportResult>()))
+                  .Callback<TrackedDownload, ImportResult>((td, ir) => td.Warn(new TrackedDownloadStatusMessage(td.DownloadItem.Title, ir.Errors)))
+                  .Returns(true);
+
+            Subject.Import(_trackedDownload);
+
+            _trackedDownload.State.Should().Be(TrackedDownloadState.ImportBlocked);
+
+            Mocker.GetMock<IEventAggregator>()
+                  .Verify(v => v.PublishEvent(It.IsAny<ManualInteractionRequiredEvent>()), Times.Once());
+        }
+
+        [Test]
+        public void should_warn_when_nothing_was_imported_and_download_client_files_are_not_rejected()
+        {
+            GivenNoFilesToImport();
+            GivenDownloadClientFiles("Drone.S01E01.HDTV/Drone.S01E01.HDTV.mkv");
+
+            Subject.Import(_trackedDownload);
+
+            _trackedDownload.State.Should().Be(TrackedDownloadState.ImportPending);
+            _trackedDownload.Status.Should().Be(TrackedDownloadStatus.Warning);
+
+            Mocker.GetMock<IRejectedImportService>()
+                  .Verify(v => v.Process(It.IsAny<TrackedDownload>(), It.IsAny<ImportResult>()), Times.Never());
+        }
+
+        [Test]
+        public void should_warn_when_download_client_reports_a_rejected_file_that_is_not_processed()
+        {
+            GivenNoFilesToImport();
+            GivenDownloadClientFiles("Drone.S01E01.HDTV/Drone.S01E01.HDTV.bat");
+
+            _trackedDownload.RemoteEpisode.Release = null;
+
+            Mocker.GetMock<IRejectedFileExtensionService>()
+                  .Setup(s => s.GetRejection(It.IsAny<IEnumerable<string>>()))
+                  .Returns(new ImportRejection(ImportRejectionReason.ExecutableFile, "Caution: Found executable file with extension: .bat"));
+
+            Mocker.GetMock<IRejectedImportService>()
+                  .Setup(s => s.Process(It.IsAny<TrackedDownload>(), It.IsAny<ImportResult>()))
+                  .Returns(false);
+
+            Subject.Import(_trackedDownload);
+
+            _trackedDownload.State.Should().Be(TrackedDownloadState.ImportPending);
+            _trackedDownload.Status.Should().Be(TrackedDownloadStatus.Warning);
+        }
+
+        [Test]
+        public void should_not_check_download_client_files_when_files_were_imported()
+        {
+            Mocker.GetMock<IDownloadedEpisodesImportService>()
+                  .Setup(v => v.ProcessPath(It.IsAny<string>(), It.IsAny<ImportMode>(), It.IsAny<Series>(), It.IsAny<DownloadClientItem>()))
+                  .Returns(new List<ImportResult>
+                           {
+                               new ImportResult(new ImportDecision(new LocalEpisode { Path = @"C:\TestPath\Droned.S01E01.mkv", Episodes = new List<Episode> { _episode1 } }))
+                           });
+
+            Subject.Import(_trackedDownload);
+
+            Mocker.GetMock<IDownloadClient>()
+                  .Verify(v => v.GetFiles(It.IsAny<DownloadClientItem>()), Times.Never());
+        }
+
+        private void GivenNoFilesToImport()
+        {
+            Mocker.GetMock<IDownloadedEpisodesImportService>()
+                  .Setup(v => v.ProcessPath(It.IsAny<string>(), It.IsAny<ImportMode>(), It.IsAny<Series>(), It.IsAny<DownloadClientItem>()))
+                  .Returns(new List<ImportResult>());
+        }
+
+        private void GivenDownloadClientFiles(params string[] files)
+        {
+            Mocker.GetMock<IDownloadClient>()
+                  .Setup(v => v.GetFiles(It.IsAny<DownloadClientItem>()))
+                  .Returns(files.Select(f => new DownloadClientFile { RelativePath = f }).ToList());
+        }
+
         private void AssertNotImported()
         {
             Mocker.GetMock<IEventAggregator>()
                   .Verify(v => v.PublishEvent(It.IsAny<DownloadCompletedEvent>()), Times.Never());
 
-            _trackedDownload.State.Should().Be(TrackedDownloadState.ImportPending);
+            _trackedDownload.State.Should().Be(TrackedDownloadState.ImportBlocked);
         }
 
         private void AssertImported()

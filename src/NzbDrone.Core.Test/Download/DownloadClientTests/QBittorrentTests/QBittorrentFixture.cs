@@ -13,6 +13,8 @@ using NzbDrone.Core.Download.Clients;
 using NzbDrone.Core.Download.Clients.QBittorrent;
 using NzbDrone.Core.Exceptions;
 using NzbDrone.Core.MediaFiles.TorrentInfo;
+using NzbDrone.Core.Parser.Model;
+using NzbDrone.Core.Validation;
 using NzbDrone.Test.Common;
 
 namespace NzbDrone.Core.Test.Download.DownloadClientTests.QBittorrentTests
@@ -108,7 +110,7 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.QBittorrentTests
             Subject.Definition.Settings.As<QBittorrentSettings>().RecentTvPriority = (int)QBittorrentPriority.First;
         }
 
-        protected void GivenGlobalSeedLimits(float maxRatio, int maxSeedingTime = -1, QBittorrentMaxRatioAction maxRatioAction = QBittorrentMaxRatioAction.Pause)
+        protected void GivenGlobalSeedLimits(float maxRatio, int maxSeedingTime = -1, int maxInactiveSeedingTime = -1, QBittorrentMaxRatioAction maxRatioAction = QBittorrentMaxRatioAction.Pause)
         {
             Mocker.GetMock<IQBittorrentProxy>()
                   .Setup(s => s.GetConfig(It.IsAny<QBittorrentSettings>()))
@@ -118,7 +120,9 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.QBittorrentTests
                       MaxRatio = maxRatio,
                       MaxRatioEnabled = maxRatio >= 0,
                       MaxSeedingTime = maxSeedingTime,
-                      MaxSeedingTimeEnabled = maxSeedingTime >= 0
+                      MaxSeedingTimeEnabled = maxSeedingTime >= 0,
+                      MaxInactiveSeedingTime = maxInactiveSeedingTime,
+                      MaxInactiveSeedingTimeEnabled = maxInactiveSeedingTime >= 0
                   });
         }
 
@@ -156,6 +160,13 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.QBittorrentTests
                 .Returns(files);
         }
 
+        private void GivenApiVersion(Version version)
+        {
+            Mocker.GetMock<IQBittorrentProxy>()
+                .Setup(v => v.GetApiVersion(It.IsAny<QBittorrentSettings>()))
+                .Returns(version);
+        }
+
         [Test]
         public void error_item_should_have_required_properties()
         {
@@ -176,8 +187,9 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.QBittorrentTests
             VerifyWarning(item);
         }
 
-        [Test]
-        public void paused_item_should_have_required_properties()
+        [TestCase("pausedDL")]
+        [TestCase("stoppedDL")]
+        public void paused_item_should_have_required_properties(string state)
         {
             var torrent = new QBittorrentTorrent
             {
@@ -186,7 +198,7 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.QBittorrentTests
                 Size = 1000,
                 Progress = 0.7,
                 Eta = 8640000,
-                State = "pausedDL",
+                State = state,
                 Label = "",
                 SavePath = ""
             };
@@ -198,6 +210,7 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.QBittorrentTests
         }
 
         [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
         [TestCase("queuedUP")]
         [TestCase("uploading")]
         [TestCase("stalledUP")]
@@ -377,6 +390,43 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.QBittorrentTests
         }
 
         [Test]
+        public void should_return_files_from_torrent_including_files_that_were_not_downloaded()
+        {
+            var torrent = new QBittorrentTorrent
+            {
+                Hash = "HASH",
+                Name = _title,
+                Size = 1000,
+                Progress = 1.0,
+                Eta = 0,
+                State = "uploading",
+                Label = "",
+                SavePath = @"C:\Torrents".AsOsAgnostic()
+            };
+
+            var files = new List<QBittorrentTorrentFile>
+            {
+                new QBittorrentTorrentFile
+                {
+                    Name = "Droned.S01E01/Droned.S01E01.bat"
+                }
+            };
+
+            GivenTorrents(new List<QBittorrentTorrent> { torrent });
+            GivenTorrentFiles(torrent.Hash, files);
+
+            var item = new DownloadClientItem
+            {
+                DownloadId = torrent.Hash
+            };
+
+            var result = Subject.GetFiles(item).ToList();
+
+            result.Should().HaveCount(1);
+            result.First().RelativePath.Should().Be("Droned.S01E01/Droned.S01E01.bat");
+        }
+
+        [Test]
         public void multi_file_torrent_outputpath_should_have_sanitised_name()
         {
             var torrent = new QBittorrentTorrent
@@ -416,8 +466,9 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.QBittorrentTests
             result.OutputPath.FullPath.Should().Be(Path.Combine(torrent.SavePath, "Droned.S01.12"));
         }
 
-        [Test]
-        public void api_261_should_use_content_path()
+        [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
+        public void api_261_should_use_content_path(string state)
         {
             var torrent = new QBittorrentTorrent
             {
@@ -426,7 +477,7 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.QBittorrentTests
                 Size = 1000,
                 Progress = 0.7,
                 Eta = 8640000,
-                State = "pausedUP",
+                State = state,
                 Label = "",
                 SavePath = @"C:\Torrents".AsOsAgnostic(),
                 ContentPath = @"C:\Torrents\Droned.S01.12".AsOsAgnostic()
@@ -447,6 +498,118 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.QBittorrentTests
             var result = Subject.GetImportItem(item, null);
 
             result.OutputPath.FullPath.Should().Be(torrent.ContentPath);
+        }
+
+        [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
+        public void should_use_root_path_when_qbit_created_a_subfolder(string state)
+        {
+            var torrent = new QBittorrentTorrent
+            {
+                Hash = "HASH",
+                Name = "Droned.S01E01",
+                Size = 1000,
+                Progress = 1.0,
+                Eta = 8640000,
+                State = state,
+                Label = "",
+                SavePath = @"C:\Torrents".AsOsAgnostic(),
+                ContentPath = @"C:\Torrents\Droned.S01E01\Droned.S01E01.rar".AsOsAgnostic(),
+                RootPath = @"C:\Torrents\Droned.S01E01".AsOsAgnostic()
+            };
+
+            GivenTorrents(new List<QBittorrentTorrent> { torrent });
+            GivenApiVersion(new Version(2, 11, 2));
+
+            var item = Subject.GetItems().Single();
+
+            item.Status.Should().Be(DownloadItemStatus.Completed);
+            item.OutputPath.FullPath.Should().Be(torrent.RootPath);
+        }
+
+        [TestCase(null, "pausedUP")]
+        [TestCase("", "pausedUP")]
+        [TestCase(null, "stoppedUP")]
+        [TestCase("", "stoppedUP")]
+        public void should_use_content_path_when_root_path_is_missing(string rootPath, string state)
+        {
+            // "Don't create subfolder" leaves root_path empty. A single-file torrent then
+            // reports content_path as the file sitting in the save directory.
+            var torrent = new QBittorrentTorrent
+            {
+                Hash = "HASH",
+                Name = "Droned.S01E01.rar",
+                Size = 1000,
+                Progress = 1.0,
+                Eta = 8640000,
+                State = state,
+                Label = "",
+                SavePath = @"C:\Torrents".AsOsAgnostic(),
+                ContentPath = @"C:\Torrents\Droned.S01E01.rar".AsOsAgnostic(),
+                RootPath = rootPath
+            };
+
+            GivenTorrents(new List<QBittorrentTorrent> { torrent });
+            GivenApiVersion(new Version(2, 11, 2));
+
+            var item = Subject.GetItems().Single();
+
+            item.Status.Should().Be(DownloadItemStatus.Completed);
+            item.OutputPath.FullPath.Should().Be(torrent.ContentPath);
+        }
+
+        [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
+        public void should_ignore_root_path_before_api_2_11_2(string state)
+        {
+            var torrent = new QBittorrentTorrent
+            {
+                Hash = "HASH",
+                Name = "Droned.S01E01",
+                Size = 1000,
+                Progress = 1.0,
+                Eta = 8640000,
+                State = state,
+                Label = "",
+                SavePath = @"C:\Torrents".AsOsAgnostic(),
+                ContentPath = @"C:\Torrents\Droned.S01E01\Droned.S01E01.rar".AsOsAgnostic(),
+                RootPath = @"C:\Torrents\Droned.S01E01".AsOsAgnostic()
+            };
+
+            GivenTorrents(new List<QBittorrentTorrent> { torrent });
+            GivenApiVersion(new Version(2, 6, 1));
+
+            var item = Subject.GetItems().Single();
+
+            item.Status.Should().Be(DownloadItemStatus.Completed);
+            item.OutputPath.FullPath.Should().Be(torrent.ContentPath);
+        }
+
+        [Test]
+        public void should_warn_when_stripped_multifile_content_path_is_the_save_path()
+        {
+            var savePath = @"C:\Torrents".AsOsAgnostic();
+            var torrent = new QBittorrentTorrent
+            {
+                Hash = "HASH",
+                Name = "Droned.S01",
+                Size = 1000,
+                Progress = 1.0,
+                Eta = 8640000,
+                State = "stoppedUP",
+                Label = "",
+                SavePath = savePath,
+                ContentPath = savePath,
+                RootPath = ""
+            };
+
+            GivenTorrents(new List<QBittorrentTorrent> { torrent });
+            GivenApiVersion(new Version(2, 11, 2));
+
+            var item = Subject.GetItems().Single();
+
+            item.Status.Should().Be(DownloadItemStatus.Warning);
+            item.OutputPath.IsEmpty.Should().BeTrue();
         }
 
         [Test]
@@ -556,6 +719,34 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.QBittorrentTests
         }
 
         [Test]
+        public void should_correct_category_output_path()
+        {
+            var config = new QBittorrentPreferences
+            {
+                SavePath = @"C:\Downloads\Finished\QBittorrent".AsOsAgnostic()
+            };
+
+            Mocker.GetMock<IQBittorrentProxy>()
+                .Setup(v => v.GetConfig(It.IsAny<QBittorrentSettings>()))
+                .Returns(config);
+
+            Mocker.GetMock<IQBittorrentProxy>()
+                .Setup(v => v.GetApiVersion(It.IsAny<QBittorrentSettings>()))
+                .Returns(new Version(2, 0));
+
+            Mocker.GetMock<IQBittorrentProxy>()
+                .Setup(s => s.GetLabels(It.IsAny<QBittorrentSettings>()))
+                .Returns(new Dictionary<string, QBittorrentLabel>
+                    { { "tv", new QBittorrentLabel { Name = "tv", SavePath = "//server/store/downloads" } } });
+
+            var result = Subject.GetStatus();
+
+            result.IsLocalhost.Should().BeTrue();
+            result.OutputRootFolders.Should().NotBeNull();
+            result.OutputRootFolders.First().Should().Be(@"\\server\store\downloads");
+        }
+
+        [Test]
         public async Task Download_should_handle_http_redirect_to_magnet()
         {
             GivenRedirectToMagnet();
@@ -610,7 +801,9 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.QBittorrentTests
             float ratio = 0.1f,
             float ratioLimit = -2,
             int seedingTime = 1,
-            int seedingTimeLimit = -2)
+            int seedingTimeLimit = -2,
+            int inactiveSeedingTimeLimit = -2,
+            long lastActivity = -1)
         {
             var torrent = new QBittorrentTorrent
             {
@@ -624,7 +817,9 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.QBittorrentTests
                 SavePath = "",
                 Ratio = ratio,
                 RatioLimit = ratioLimit,
-                SeedingTimeLimit = seedingTimeLimit
+                SeedingTimeLimit = seedingTimeLimit,
+                InactiveSeedingTimeLimit = inactiveSeedingTimeLimit,
+                LastActivity = lastActivity == -1 ? DateTimeOffset.UtcNow.ToUnixTimeSeconds() : lastActivity
             };
 
             GivenTorrents(new List<QBittorrentTorrent>() { torrent });
@@ -651,44 +846,96 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.QBittorrentTests
             item.CanMoveFiles.Should().BeFalse();
         }
 
-        [Test]
-        public void should_not_be_removable_and_should_not_allow_move_files_if_max_ratio_is_not_set()
+        [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
+        public void should_not_be_removable_and_should_not_allow_move_files_if_max_ratio_is_not_set(string state)
         {
             GivenGlobalSeedLimits(-1);
-            GivenCompletedTorrent("pausedUP", ratio: 1.0f);
+            GivenCompletedTorrent(state, ratio: 1.0f);
 
             var item = Subject.GetItems().Single();
             item.CanBeRemoved.Should().BeFalse();
             item.CanMoveFiles.Should().BeFalse();
         }
 
-        [Test]
-        public void should_be_removable_and_should_allow_move_files_if_max_ratio_reached_and_paused()
+        [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
+        public void should_be_removable_and_should_allow_move_files_if_max_ratio_reached_and_paused(string state)
         {
             GivenGlobalSeedLimits(1.0f);
-            GivenCompletedTorrent("pausedUP", ratio: 1.0f);
+            GivenCompletedTorrent(state, ratio: 1.0f);
 
             var item = Subject.GetItems().Single();
             item.CanBeRemoved.Should().BeTrue();
             item.CanMoveFiles.Should().BeTrue();
         }
 
-        [Test]
-        public void should_be_removable_and_should_allow_move_files_if_overridden_max_ratio_reached_and_paused()
+        [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
+        public void should_be_removable_and_should_allow_move_files_if_max_ratio_reached_after_rounding_and_paused(string state)
+        {
+            GivenGlobalSeedLimits(1.0f);
+            GivenCompletedTorrent(state, ratio: 1.1006066990976857f);
+
+            var item = Subject.GetItems().Single();
+            item.CanBeRemoved.Should().BeTrue();
+            item.CanMoveFiles.Should().BeTrue();
+        }
+
+        [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
+        public void should_be_removable_and_should_allow_move_files_if_just_under_max_ratio_reached_after_rounding_and_paused(string state)
+        {
+            GivenGlobalSeedLimits(1.0f);
+            GivenCompletedTorrent(state, ratio: 0.9999f);
+
+            var item = Subject.GetItems().Single();
+            item.CanBeRemoved.Should().BeTrue();
+            item.CanMoveFiles.Should().BeTrue();
+        }
+
+        [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
+        public void should_be_removable_and_should_allow_move_files_if_overridden_max_ratio_reached_and_paused(string state)
         {
             GivenGlobalSeedLimits(2.0f);
-            GivenCompletedTorrent("pausedUP", ratio: 1.0f, ratioLimit: 0.8f);
+            GivenCompletedTorrent(state, ratio: 1.0f, ratioLimit: 0.8f);
 
             var item = Subject.GetItems().Single();
             item.CanBeRemoved.Should().BeTrue();
             item.CanMoveFiles.Should().BeTrue();
         }
 
-        [Test]
-        public void should_not_be_removable_if_overridden_max_ratio_not_reached_and_paused()
+        [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
+        public void should_be_removable_and_should_allow_move_files_if_overridden_max_ratio_reached_after_rounding_and_paused(string state)
+        {
+            GivenGlobalSeedLimits(2.0f);
+            GivenCompletedTorrent(state, ratio: 1.1006066990976857f, ratioLimit: 1.1f);
+
+            var item = Subject.GetItems().Single();
+            item.CanBeRemoved.Should().BeTrue();
+            item.CanMoveFiles.Should().BeTrue();
+        }
+
+        [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
+        public void should_be_removable_and_should_allow_move_files_if_just_under_overridden_max_ratio_reached_after_rounding_and_paused(string state)
+        {
+            GivenGlobalSeedLimits(2.0f);
+            GivenCompletedTorrent(state, ratio: 0.9999f, ratioLimit: 1.0f);
+
+            var item = Subject.GetItems().Single();
+            item.CanBeRemoved.Should().BeTrue();
+            item.CanMoveFiles.Should().BeTrue();
+        }
+
+        [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
+        public void should_not_be_removable_if_overridden_max_ratio_not_reached_and_paused(string state)
         {
             GivenGlobalSeedLimits(0.2f);
-            GivenCompletedTorrent("pausedUP", ratio: 0.5f, ratioLimit: 0.8f);
+            GivenCompletedTorrent(state, ratio: 0.5f, ratioLimit: 0.8f);
 
             var item = Subject.GetItems().Single();
             item.CanBeRemoved.Should().BeFalse();
@@ -706,33 +953,36 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.QBittorrentTests
             item.CanMoveFiles.Should().BeFalse();
         }
 
-        [Test]
-        public void should_be_removable_and_should_allow_move_files_if_max_seedingtime_reached_and_paused()
+        [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
+        public void should_be_removable_and_should_allow_move_files_if_max_seedingtime_reached_and_paused(string state)
         {
             GivenGlobalSeedLimits(-1, 20);
-            GivenCompletedTorrent("pausedUP", ratio: 2.0f, seedingTime: 20);
+            GivenCompletedTorrent(state, ratio: 2.0f, seedingTime: 20);
 
             var item = Subject.GetItems().Single();
             item.CanBeRemoved.Should().BeTrue();
             item.CanMoveFiles.Should().BeTrue();
         }
 
-        [Test]
-        public void should_be_removable_and_should_allow_move_files_if_overridden_max_seedingtime_reached_and_paused()
+        [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
+        public void should_be_removable_and_should_allow_move_files_if_overridden_max_seedingtime_reached_and_paused(string state)
         {
             GivenGlobalSeedLimits(-1, 40);
-            GivenCompletedTorrent("pausedUP", ratio: 2.0f, seedingTime: 20, seedingTimeLimit: 10);
+            GivenCompletedTorrent(state, ratio: 2.0f, seedingTime: 20, seedingTimeLimit: 10);
 
             var item = Subject.GetItems().Single();
             item.CanBeRemoved.Should().BeTrue();
             item.CanMoveFiles.Should().BeTrue();
         }
 
-        [Test]
-        public void should_not_be_removable_if_overridden_max_seedingtime_not_reached_and_paused()
+        [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
+        public void should_not_be_removable_if_overridden_max_seedingtime_not_reached_and_paused(string state)
         {
             GivenGlobalSeedLimits(-1, 20);
-            GivenCompletedTorrent("pausedUP", ratio: 2.0f, seedingTime: 30, seedingTimeLimit: 40);
+            GivenCompletedTorrent(state, ratio: 2.0f, seedingTime: 30, seedingTimeLimit: 40);
 
             var item = Subject.GetItems().Single();
             item.CanBeRemoved.Should().BeFalse();
@@ -740,21 +990,82 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.QBittorrentTests
         }
 
         [Test]
-        public void should_be_removable_and_should_allow_move_files_if_max_seedingtime_reached_but_ratio_not_and_paused()
+        public void should_not_be_removable_and_should_not_allow_move_files_if_max_inactive_seedingtime_reached_and_not_paused()
         {
-            GivenGlobalSeedLimits(2.0f, 20);
-            GivenCompletedTorrent("pausedUP", ratio: 1.0f, seedingTime: 30);
+            GivenGlobalSeedLimits(-1, maxInactiveSeedingTime: 20);
+            GivenCompletedTorrent("uploading", ratio: 2.0f, lastActivity: DateTimeOffset.UtcNow.Subtract(TimeSpan.FromMinutes(25)).ToUnixTimeSeconds());
+
+            var item = Subject.GetItems().Single();
+            item.CanBeRemoved.Should().BeFalse();
+            item.CanMoveFiles.Should().BeFalse();
+        }
+
+        [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
+        public void should_be_removable_and_should_allow_move_files_if_max_inactive_seedingtime_reached_and_paused(string state)
+        {
+            GivenGlobalSeedLimits(-1, maxInactiveSeedingTime: 20);
+            GivenCompletedTorrent(state, ratio: 2.0f, lastActivity: DateTimeOffset.UtcNow.Subtract(TimeSpan.FromMinutes(25)).ToUnixTimeSeconds());
 
             var item = Subject.GetItems().Single();
             item.CanBeRemoved.Should().BeTrue();
             item.CanMoveFiles.Should().BeTrue();
         }
 
-        [Test]
-        public void should_not_fetch_details_twice()
+        [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
+        public void should_be_removable_and_should_allow_move_files_if_overridden_max_inactive_seedingtime_reached_and_paused(string state)
+        {
+            GivenGlobalSeedLimits(-1, maxInactiveSeedingTime: 40);
+            GivenCompletedTorrent(state, ratio: 2.0f, seedingTime: 20, inactiveSeedingTimeLimit: 10, lastActivity: DateTimeOffset.UtcNow.Subtract(TimeSpan.FromMinutes(15)).ToUnixTimeSeconds());
+
+            var item = Subject.GetItems().Single();
+            item.CanBeRemoved.Should().BeTrue();
+            item.CanMoveFiles.Should().BeTrue();
+        }
+
+        [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
+        public void should_not_be_removable_if_overridden_max_inactive_seedingtime_not_reached_and_paused(string state)
+        {
+            GivenGlobalSeedLimits(-1, maxInactiveSeedingTime: 20);
+            GivenCompletedTorrent(state, ratio: 2.0f, seedingTime: 30, inactiveSeedingTimeLimit: 40, lastActivity: DateTimeOffset.UtcNow.Subtract(TimeSpan.FromMinutes(30)).ToUnixTimeSeconds());
+
+            var item = Subject.GetItems().Single();
+            item.CanBeRemoved.Should().BeFalse();
+            item.CanMoveFiles.Should().BeFalse();
+        }
+
+        [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
+        public void should_be_removable_and_should_allow_move_files_if_max_seedingtime_reached_but_ratio_not_and_paused(string state)
+        {
+            GivenGlobalSeedLimits(2.0f, 20);
+            GivenCompletedTorrent(state, ratio: 1.0f, seedingTime: 30);
+
+            var item = Subject.GetItems().Single();
+            item.CanBeRemoved.Should().BeTrue();
+            item.CanMoveFiles.Should().BeTrue();
+        }
+
+        [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
+        public void should_be_removable_and_should_allow_move_files_if_max_inactive_seedingtime_reached_but_ratio_not_and_paused(string state)
+        {
+            GivenGlobalSeedLimits(2.0f, maxInactiveSeedingTime: 20);
+            GivenCompletedTorrent(state, ratio: 1.0f, lastActivity: DateTimeOffset.UtcNow.Subtract(TimeSpan.FromMinutes(25)).ToUnixTimeSeconds());
+
+            var item = Subject.GetItems().Single();
+            item.CanBeRemoved.Should().BeTrue();
+            item.CanMoveFiles.Should().BeTrue();
+        }
+
+        [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
+        public void should_not_fetch_details_twice(string state)
         {
             GivenGlobalSeedLimits(-1, 30);
-            GivenCompletedTorrent("pausedUP", ratio: 2.0f, seedingTime: 20);
+            GivenCompletedTorrent(state, ratio: 2.0f, seedingTime: 20);
 
             var item = Subject.GetItems().Single();
             item.CanBeRemoved.Should().BeFalse();
@@ -766,8 +1077,9 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.QBittorrentTests
                   .Verify(p => p.GetTorrentProperties(It.IsAny<string>(), It.IsAny<QBittorrentSettings>()), Times.Once());
         }
 
-        [Test]
-        public void should_get_category_from_the_category_if_set()
+        [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
+        public void should_get_category_from_the_category_if_set(string state)
         {
             const string category = "tv-sonarr";
             GivenGlobalSeedLimits(1.0f);
@@ -779,7 +1091,7 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.QBittorrentTests
                 Size = 1000,
                 Progress = 1.0,
                 Eta = 8640000,
-                State = "pausedUP",
+                State = state,
                 Category = category,
                 SavePath = "",
                 Ratio = 1.0f
@@ -791,8 +1103,9 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.QBittorrentTests
             item.Category.Should().Be(category);
         }
 
-        [Test]
-        public void should_get_category_from_the_label_if_the_category_is_not_available()
+        [TestCase("pausedUP")]
+        [TestCase("stoppedUP")]
+        public void should_get_category_from_the_label_if_the_category_is_not_available(string state)
         {
             const string category = "tv-sonarr";
             GivenGlobalSeedLimits(1.0f);
@@ -804,7 +1117,7 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.QBittorrentTests
                 Size = 1000,
                 Progress = 1.0,
                 Eta = 8640000,
-                State = "pausedUP",
+                State = state,
                 Label = category,
                 SavePath = "",
                 Ratio = 1.0f
@@ -826,6 +1139,260 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.QBittorrentTests
             var json = "{ \"eta\": 18446744073709335000 }";
             var torrent = Newtonsoft.Json.JsonConvert.DeserializeObject<QBittorrentTorrent>(json);
             torrent.Eta.ToString().Should().Be("18446744073709335000");
+        }
+
+        protected List<HttpRequest> GivenQBittorrentProxyV2(Version apiVersion)
+        {
+            var requests = new List<HttpRequest>();
+
+            Mocker.GetMock<IHttpClient>()
+                  .Setup(s => s.Execute(It.IsAny<HttpRequest>()))
+                  .Returns<HttpRequest>(r =>
+                  {
+                      requests.Add(r);
+
+                      if (r.Url.FullUri.Contains("/api/v2/app/webapiVersion"))
+                      {
+                          return new HttpResponse(r, new HttpHeader(), apiVersion.ToString());
+                      }
+
+                      if (r.Url.FullUri.Contains("/api/v2/app/preferences"))
+                      {
+                          return new HttpResponse(r, new HttpHeader(), "{ \"dht\": true }");
+                      }
+
+                      return new HttpResponse(r, new HttpHeader(), "Ok.");
+                  });
+
+            Mocker.GetMock<IQBittorrentProxySelector>()
+                  .Setup(s => s.GetProxy(It.IsAny<QBittorrentSettings>(), It.IsAny<bool>()))
+                  .Returns(Mocker.Resolve<QBittorrentProxyV2>());
+
+            Mocker.GetMock<IQBittorrentProxySelector>()
+                  .Setup(s => s.GetApiVersion(It.IsAny<QBittorrentSettings>(), It.IsAny<bool>()))
+                  .Returns(apiVersion);
+
+            return requests;
+        }
+
+        protected void GivenSeedTimeType(QBittorrentSeedTimeType seedTimeType)
+        {
+            Subject.Definition.Settings.As<QBittorrentSettings>().SeedTimeType = (int)seedTimeType;
+        }
+
+        protected RemoteEpisode CreateRemoteEpisodeWithSeedConfiguration(TimeSpan seedTime)
+        {
+            var remoteEpisode = CreateRemoteEpisode();
+            remoteEpisode.SeedConfiguration = new TorrentSeedConfiguration
+            {
+                Ratio = 1.5,
+                SeedTime = seedTime
+            };
+
+            return remoteEpisode;
+        }
+
+        protected Dictionary<string, string> GetFormParameters(List<HttpRequest> requests, string resource)
+        {
+            var request = requests.Single(r => r.Url.FullUri.Contains(resource));
+
+            // ContentSummary holds the form as "name=value" pairs, separated by '&' (urlencoded) or line breaks (multipart)
+            return request.ContentSummary
+                .Split(new[] { '&', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(p => p.Split('=', 2))
+                .ToDictionary(p => p[0], p => p.Length > 1 ? Uri.UnescapeDataString(p[1]) : string.Empty);
+        }
+
+        [Test]
+        public async Task Download_should_send_total_seeding_time_limit_by_default()
+        {
+            var requests = GivenQBittorrentProxyV2(new Version(2, 11, 0));
+
+            var remoteEpisode = CreateRemoteEpisodeWithSeedConfiguration(TimeSpan.FromMinutes(60));
+
+            await Subject.Download(remoteEpisode, CreateIndexer());
+
+            var form = GetFormParameters(requests, "/api/v2/torrents/add");
+
+            form.Should().Contain("seedingTimeLimit", "60");
+            form.Should().Contain("ratioLimit", "1.5");
+            form.Should().NotContainKey("inactiveSeedingTimeLimit");
+        }
+
+        [Test]
+        public async Task Download_should_send_total_seeding_time_limit_when_seed_time_type_is_total()
+        {
+            GivenSeedTimeType(QBittorrentSeedTimeType.Total);
+
+            var requests = GivenQBittorrentProxyV2(new Version(2, 11, 0));
+
+            var remoteEpisode = CreateRemoteEpisodeWithSeedConfiguration(TimeSpan.FromMinutes(60));
+
+            await Subject.Download(remoteEpisode, CreateIndexer());
+
+            var form = GetFormParameters(requests, "/api/v2/torrents/add");
+
+            form.Should().Contain("seedingTimeLimit", "60");
+            form.Should().NotContainKey("inactiveSeedingTimeLimit");
+        }
+
+        [TestCase(2, 9, 2)]
+        [TestCase(2, 11, 0)]
+        public async Task Download_should_send_inactive_seeding_time_limit_when_seed_time_type_is_inactive(int major, int minor, int build)
+        {
+            GivenSeedTimeType(QBittorrentSeedTimeType.Inactive);
+
+            var requests = GivenQBittorrentProxyV2(new Version(major, minor, build));
+
+            var remoteEpisode = CreateRemoteEpisodeWithSeedConfiguration(TimeSpan.FromMinutes(60));
+
+            await Subject.Download(remoteEpisode, CreateIndexer());
+
+            var form = GetFormParameters(requests, "/api/v2/torrents/add");
+
+            form.Should().Contain("inactiveSeedingTimeLimit", "60");
+            form.Should().Contain("ratioLimit", "1.5");
+            form.Should().NotContainKey("seedingTimeLimit");
+        }
+
+        [Test]
+        public async Task Download_magnet_should_send_inactive_seeding_time_limit_when_seed_time_type_is_inactive()
+        {
+            GivenSeedTimeType(QBittorrentSeedTimeType.Inactive);
+
+            var requests = GivenQBittorrentProxyV2(new Version(2, 11, 0));
+
+            var remoteEpisode = CreateRemoteEpisodeWithSeedConfiguration(TimeSpan.FromMinutes(60));
+            remoteEpisode.Release.DownloadUrl = "magnet:?xt=urn:btih:ZPBPA2P6ROZPKRHK44D5OW6NHXU5Z6KR&tr=udp";
+
+            await Subject.Download(remoteEpisode, CreateIndexer());
+
+            var form = GetFormParameters(requests, "/api/v2/torrents/add");
+
+            form.Should().Contain("inactiveSeedingTimeLimit", "60");
+            form.Should().NotContainKey("seedingTimeLimit");
+        }
+
+        [Test]
+        public async Task Download_should_send_seed_time_in_minutes_as_inactive_seeding_time_limit_when_seed_time_type_is_inactive()
+        {
+            GivenSeedTimeType(QBittorrentSeedTimeType.Inactive);
+
+            var requests = GivenQBittorrentProxyV2(new Version(2, 11, 0));
+
+            var remoteEpisode = CreateRemoteEpisodeWithSeedConfiguration(TimeSpan.FromDays(7));
+
+            await Subject.Download(remoteEpisode, CreateIndexer());
+
+            var form = GetFormParameters(requests, "/api/v2/torrents/add");
+
+            form.Should().Contain("inactiveSeedingTimeLimit", "10080");
+            form.Should().NotContainKey("seedingTimeLimit");
+        }
+
+        [Test]
+        public async Task Download_should_not_send_seeding_time_limit_when_seed_time_is_not_set_and_seed_time_type_is_inactive()
+        {
+            GivenSeedTimeType(QBittorrentSeedTimeType.Inactive);
+
+            var requests = GivenQBittorrentProxyV2(new Version(2, 11, 0));
+
+            var remoteEpisode = CreateRemoteEpisode();
+            remoteEpisode.SeedConfiguration = new TorrentSeedConfiguration { Ratio = 1.5 };
+
+            await Subject.Download(remoteEpisode, CreateIndexer());
+
+            var form = GetFormParameters(requests, "/api/v2/torrents/add");
+
+            form.Should().Contain("ratioLimit", "1.5");
+            form.Should().NotContainKey("seedingTimeLimit");
+            form.Should().NotContainKey("inactiveSeedingTimeLimit");
+        }
+
+        [Test]
+        public async Task Download_should_fall_back_to_total_seeding_time_limit_when_inactive_is_not_supported()
+        {
+            GivenSeedTimeType(QBittorrentSeedTimeType.Inactive);
+
+            // qBittorrent 4.5.x
+            var requests = GivenQBittorrentProxyV2(new Version(2, 8, 19));
+
+            var remoteEpisode = CreateRemoteEpisodeWithSeedConfiguration(TimeSpan.FromMinutes(60));
+
+            await Subject.Download(remoteEpisode, CreateIndexer());
+
+            var form = GetFormParameters(requests, "/api/v2/torrents/add");
+
+            form.Should().Contain("seedingTimeLimit", "60");
+            form.Should().NotContainKey("inactiveSeedingTimeLimit");
+
+            ExceptionVerification.ExpectedWarns(1);
+        }
+
+        [Test]
+        public async Task Download_should_fall_back_to_total_seeding_time_limit_when_share_limits_are_set_after_adding()
+        {
+            GivenSeedTimeType(QBittorrentSeedTimeType.Inactive);
+
+            // Before api v2.8.1 share limits are set with a separate call after the torrent is added
+            var requests = GivenQBittorrentProxyV2(new Version(2, 2, 0));
+
+            var remoteEpisode = CreateRemoteEpisodeWithSeedConfiguration(TimeSpan.FromMinutes(60));
+
+            await Subject.Download(remoteEpisode, CreateIndexer());
+
+            var addForm = GetFormParameters(requests, "/api/v2/torrents/add");
+
+            addForm.Should().NotContainKey("seedingTimeLimit");
+            addForm.Should().NotContainKey("inactiveSeedingTimeLimit");
+
+            var shareLimitsForm = GetFormParameters(requests, "/api/v2/torrents/setShareLimits");
+
+            shareLimitsForm.Should().Contain("seedingTimeLimit", "60");
+            shareLimitsForm.Should().NotContainKey("inactiveSeedingTimeLimit");
+
+            ExceptionVerification.ExpectedWarns(1);
+        }
+
+        [TestCase(2, 8, 19, true)]
+        [TestCase(2, 9, 2, false)]
+        public void Test_should_warn_if_inactive_seed_time_is_not_supported(int major, int minor, int build, bool expectWarning)
+        {
+            GivenSeedTimeType(QBittorrentSeedTimeType.Inactive);
+
+            Subject.Definition.Settings.As<QBittorrentSettings>().TvCategory = null;
+
+            Mocker.GetMock<IQBittorrentProxy>()
+                  .Setup(v => v.GetApiVersion(It.IsAny<QBittorrentSettings>()))
+                  .Returns(new Version(major, minor, build));
+
+            var result = Subject.Test();
+
+            var failure = result.Errors.SingleOrDefault(e => e.PropertyName == nameof(QBittorrentSettings.SeedTimeType));
+
+            if (expectWarning)
+            {
+                failure.Should().NotBeNull();
+                failure.Should().BeOfType<NzbDroneValidationFailure>().Which.IsWarning.Should().BeTrue();
+            }
+            else
+            {
+                failure.Should().BeNull();
+            }
+        }
+
+        [Test]
+        public void Test_should_not_warn_about_seed_time_type_when_seed_time_type_is_total()
+        {
+            Subject.Definition.Settings.As<QBittorrentSettings>().TvCategory = null;
+
+            Mocker.GetMock<IQBittorrentProxy>()
+                  .Setup(v => v.GetApiVersion(It.IsAny<QBittorrentSettings>()))
+                  .Returns(new Version(2, 8, 19));
+
+            var result = Subject.Test();
+
+            result.Errors.Should().NotContain(e => e.PropertyName == nameof(QBittorrentSettings.SeedTimeType));
         }
 
         [Test]

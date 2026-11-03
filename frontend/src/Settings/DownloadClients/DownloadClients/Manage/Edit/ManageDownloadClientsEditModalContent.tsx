@@ -1,15 +1,18 @@
 import React, { useCallback, useState } from 'react';
-import FormGroup from 'Components/Form/FormGroup';
-import FormInputGroup from 'Components/Form/FormInputGroup';
+import FormInput from 'Components/Form/FormInput';
 import FormLabel from 'Components/Form/FormLabel';
+import FormRow from 'Components/Form/FormRow';
+import { EnhancedSelectInputValue } from 'Components/Form/Select/EnhancedSelectInput';
 import Button from 'Components/Link/Button';
 import ModalBody from 'Components/Modal/ModalBody';
 import ModalContent from 'Components/Modal/ModalContent';
 import ModalFooter from 'Components/Modal/ModalFooter';
 import ModalHeader from 'Components/Modal/ModalHeader';
+import ModalSection from 'Components/ModalSection';
 import { inputTypes } from 'Helpers/Props';
+import { InputChanged } from 'typings/inputs';
 import translate from 'Utilities/String/translate';
-import styles from './ManageDownloadClientsEditModalContent.css';
+import styles from './ManageDownloadClientsEditModalContent.module.css';
 
 interface SavePayload {
   enable?: boolean;
@@ -26,7 +29,7 @@ interface ManageDownloadClientsEditModalContentProps {
 
 const NO_CHANGE = 'noChange';
 
-const enableOptions = [
+const enableOptions: EnhancedSelectInputValue<string>[] = [
   {
     key: NO_CHANGE,
     get value() {
@@ -57,7 +60,7 @@ function ManageDownloadClientsEditModalContent(
   const [removeCompletedDownloads, setRemoveCompletedDownloads] =
     useState(NO_CHANGE);
   const [removeFailedDownloads, setRemoveFailedDownloads] = useState(NO_CHANGE);
-  const [priority, setPriority] = useState<null | string | number>(null);
+  const [priority, setPriority] = useState<null | number>(null);
 
   const save = useCallback(() => {
     let hasChanges = false;
@@ -97,53 +100,49 @@ function ManageDownloadClientsEditModalContent(
     onModalClose,
   ]);
 
-  const onInputChange = useCallback(
-    ({ name, value }: { name: string; value: string }) => {
-      switch (name) {
-        case 'enable':
-          setEnable(value);
-          break;
-        case 'priority':
-          setPriority(value);
-          break;
-        case 'removeCompletedDownloads':
-          setRemoveCompletedDownloads(value);
-          break;
-        case 'removeFailedDownloads':
-          setRemoveFailedDownloads(value);
-          break;
-        default:
-          console.warn(
-            `EditDownloadClientsModalContent Unknown Input: '${name}'`
-          );
-      }
-    },
-    []
-  );
+  const onInputChange = useCallback(({ name, value }: InputChanged) => {
+    switch (name) {
+      case 'enable':
+        setEnable(value as string);
+        break;
+      case 'priority':
+        setPriority(value as number);
+        break;
+      case 'removeCompletedDownloads':
+        setRemoveCompletedDownloads(value as string);
+        break;
+      case 'removeFailedDownloads':
+        setRemoveFailedDownloads(value as string);
+        break;
+      default:
+        console.warn(
+          `EditDownloadClientsModalContent Unknown Input: '${name}'`
+        );
+    }
+  }, []);
 
   const selectedCount = downloadClientIds.length;
 
   return (
     <ModalContent onModalClose={onModalClose}>
       <ModalHeader>{translate('EditSelectedDownloadClients')}</ModalHeader>
-
       <ModalBody>
-        <FormGroup>
+        <FormRow>
           <FormLabel>{translate('Enabled')}</FormLabel>
 
-          <FormInputGroup
+          <FormInput
             type={inputTypes.SELECT}
             name="enable"
             value={enable}
             values={enableOptions}
             onChange={onInputChange}
           />
-        </FormGroup>
+        </FormRow>
 
-        <FormGroup>
+        <FormRow>
           <FormLabel>{translate('Priority')}</FormLabel>
 
-          <FormInputGroup
+          <FormInput
             type={inputTypes.NUMBER}
             name="priority"
             value={priority}
@@ -151,31 +150,37 @@ function ManageDownloadClientsEditModalContent(
             max={50}
             onChange={onInputChange}
           />
-        </FormGroup>
+        </FormRow>
 
-        <FormGroup>
-          <FormLabel>{translate('RemoveCompletedDownloads')}</FormLabel>
+        <ModalSection
+          title={translate(
+            'ManageDownloadClientsEditModalContentCompletedSection'
+          )}
+        >
+          <FormRow>
+            <FormLabel>{translate('RemoveCompletedDownloads')}</FormLabel>
 
-          <FormInputGroup
-            type={inputTypes.SELECT}
-            name="removeCompletedDownloads"
-            value={removeCompletedDownloads}
-            values={enableOptions}
-            onChange={onInputChange}
-          />
-        </FormGroup>
+            <FormInput
+              type={inputTypes.SELECT}
+              name="removeCompletedDownloads"
+              value={removeCompletedDownloads}
+              values={enableOptions}
+              onChange={onInputChange}
+            />
+          </FormRow>
 
-        <FormGroup>
-          <FormLabel>{translate('RemoveFailedDownloads')}</FormLabel>
+          <FormRow>
+            <FormLabel>{translate('RemoveFailedDownloads')}</FormLabel>
 
-          <FormInputGroup
-            type={inputTypes.SELECT}
-            name="removeFailedDownloads"
-            value={removeFailedDownloads}
-            values={enableOptions}
-            onChange={onInputChange}
-          />
-        </FormGroup>
+            <FormInput
+              type={inputTypes.SELECT}
+              name="removeFailedDownloads"
+              value={removeFailedDownloads}
+              values={enableOptions}
+              onChange={onInputChange}
+            />
+          </FormRow>
+        </ModalSection>
       </ModalBody>
 
       <ModalFooter className={styles.modalFooter}>
@@ -185,7 +190,7 @@ function ManageDownloadClientsEditModalContent(
           })}
         </div>
 
-        <div>
+        <div className={styles.buttons}>
           <Button onPress={onModalClose}>{translate('Cancel')}</Button>
 
           <Button onPress={save}>{translate('ApplyChanges')}</Button>

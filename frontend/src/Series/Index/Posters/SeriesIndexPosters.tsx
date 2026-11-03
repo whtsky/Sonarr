@@ -1,26 +1,19 @@
 import { throttle } from 'lodash';
 import React, { RefObject, useEffect, useMemo, useRef, useState } from 'react';
-import { useSelector } from 'react-redux';
 import { FixedSizeGrid as Grid, GridChildComponentProps } from 'react-window';
-import { createSelector } from 'reselect';
-import AppState from 'App/State/AppState';
 import useMeasure from 'Helpers/Hooks/useMeasure';
-import SortDirection from 'Helpers/Props/SortDirection';
+import { SortDirection } from 'Helpers/Props/sortDirections';
 import SeriesIndexPoster from 'Series/Index/Posters/SeriesIndexPoster';
 import Series from 'Series/Series';
+import { useSeriesPosterOptions } from 'Series/seriesOptionsStore';
 import dimensions from 'Styles/Variables/dimensions';
 import getIndexOfFirstCharacter from 'Utilities/Array/getIndexOfFirstCharacter';
 
-const bodyPadding = parseInt(dimensions.pageContentBodyPadding);
-const bodyPaddingSmallScreen = parseInt(
-  dimensions.pageContentBodyPaddingSmallScreen
-);
-const columnPadding = parseInt(dimensions.seriesIndexColumnPadding);
-const columnPaddingSmallScreen = parseInt(
-  dimensions.seriesIndexColumnPaddingSmallScreen
-);
-const progressBarHeight = parseInt(dimensions.progressBarSmallHeight);
-const detailedProgressBarHeight = parseInt(dimensions.progressBarMediumHeight);
+const bodyPaddingSmallScreen = dimensions.pageContentBodyPaddingSmallScreen;
+const columnPadding = dimensions.seriesIndexColumnPadding;
+const columnPaddingSmallScreen = dimensions.seriesIndexColumnPaddingSmallScreen;
+const progressBarHeight = dimensions.progressBarSmallHeight;
+const detailedProgressBarHeight = dimensions.progressBarMediumHeight;
 
 const ADDITIONAL_COLUMN_COUNT: Record<string, number> = {
   small: 3,
@@ -51,21 +44,12 @@ interface SeriesIndexPostersProps {
   isSmallScreen: boolean;
 }
 
-const seriesIndexSelector = createSelector(
-  (state: AppState) => state.seriesIndex.posterOptions,
-  (posterOptions) => {
-    return {
-      posterOptions,
-    };
-  }
-);
-
-const Cell: React.FC<GridChildComponentProps<CellItemData>> = ({
+function Cell({
   columnIndex,
   rowIndex,
   style,
   data,
-}) => {
+}: GridChildComponentProps<CellItemData>) {
   const { layout, items, sortKey, isSelectMode } = data;
   const { columnCount, padding, posterWidth, posterHeight } = layout;
   const index = rowIndex * columnCount + columnIndex;
@@ -92,23 +76,28 @@ const Cell: React.FC<GridChildComponentProps<CellItemData>> = ({
       />
     </div>
   );
-};
+}
 
 function getWindowScrollTopPosition() {
   return document.documentElement.scrollTop || document.body.scrollTop || 0;
 }
 
-export default function SeriesIndexPosters(props: SeriesIndexPostersProps) {
+export default function SeriesIndexPosters({
+  scrollerRef,
+  items,
+  sortKey,
+  jumpToCharacter,
+  isSelectMode,
+  isSmallScreen,
+}: SeriesIndexPostersProps) {
   const {
-    scrollerRef,
-    items,
-    sortKey,
-    jumpToCharacter,
-    isSelectMode,
-    isSmallScreen,
-  } = props;
-
-  const { posterOptions } = useSelector(seriesIndexSelector);
+    detailedProgressBar,
+    showTitle,
+    showMonitored,
+    showQualityProfile,
+    showTags,
+    size: posterSize,
+  } = useSeriesPosterOptions();
   const ref = useRef<Grid>(null);
   const [measureRef, bounds] = useMeasure();
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -120,48 +109,44 @@ export default function SeriesIndexPosters(props: SeriesIndexPostersProps) {
     const remainder = width % maximumColumnWidth;
     return remainder === 0
       ? maximumColumnWidth
-      : Math.floor(
-          width / (columns + ADDITIONAL_COLUMN_COUNT[posterOptions.size])
-        );
-  }, [isSmallScreen, posterOptions, size]);
+      : Math.floor(width / (columns + ADDITIONAL_COLUMN_COUNT[posterSize]));
+  }, [isSmallScreen, posterSize, size]);
 
   const columnCount = useMemo(
     () => Math.max(Math.floor(size.width / columnWidth), 1),
     [size, columnWidth]
   );
-  const padding = props.isSmallScreen
-    ? columnPaddingSmallScreen
-    : columnPadding;
+  const padding = isSmallScreen ? columnPaddingSmallScreen : columnPadding;
   const posterWidth = columnWidth - padding * 2;
   const posterHeight = Math.ceil((250 / 170) * posterWidth);
 
   const rowHeight = useMemo(() => {
-    const {
-      detailedProgressBar,
-      showTitle,
-      showMonitored,
-      showQualityProfile,
-    } = posterOptions;
-
-    const nextAiringHeight = 19;
+    const gap = 6;
+    const lineHeight = 18 + gap;
+    const tagsHeight = 23 + gap;
+    const cellPadding = isSmallScreen
+      ? columnPaddingSmallScreen
+      : columnPadding;
 
     const heights = [
       posterHeight,
-      detailedProgressBar ? detailedProgressBarHeight : progressBarHeight,
-      nextAiringHeight,
-      isSmallScreen ? columnPaddingSmallScreen : columnPadding,
+      (detailedProgressBar ? detailedProgressBarHeight : progressBarHeight) +
+        gap,
+      lineHeight,
+      // Top + bottom cell padding, plus 8px of slack.
+      cellPadding * 2 + 8,
     ];
 
     if (showTitle) {
-      heights.push(19);
+      heights.push(6 + 20 + gap);
     }
 
-    if (showMonitored) {
-      heights.push(19);
+    if (showMonitored || showQualityProfile) {
+      heights.push(lineHeight);
     }
 
-    if (showQualityProfile) {
-      heights.push(19);
+    if (showTags && items.some((s) => s.tags && s.tags.length > 0)) {
+      heights.push(tagsHeight);
     }
 
     switch (sortKey) {
@@ -171,19 +156,37 @@ export default function SeriesIndexPosters(props: SeriesIndexPostersProps) {
       case 'added':
       case 'path':
       case 'sizeOnDisk':
-        heights.push(19);
+      case 'ratings':
+        heights.push(lineHeight);
         break;
       case 'qualityProfileId':
         if (!showQualityProfile) {
-          heights.push(19);
+          heights.push(lineHeight);
         }
+
+        break;
+      case 'tags':
+        if (!showTags && items.some((s) => s.tags && s.tags.length > 0)) {
+          heights.push(tagsHeight);
+        }
+
         break;
       default:
-      // No need to add a height of 0
+        break;
     }
 
     return heights.reduce((acc, height) => acc + height, 0);
-  }, [isSmallScreen, posterOptions, sortKey, posterHeight]);
+  }, [
+    isSmallScreen,
+    detailedProgressBar,
+    showTitle,
+    showMonitored,
+    showQualityProfile,
+    showTags,
+    sortKey,
+    posterHeight,
+    items,
+  ]);
 
   useEffect(() => {
     const current = scrollerRef.current;
@@ -204,11 +207,9 @@ export default function SeriesIndexPosters(props: SeriesIndexPostersProps) {
     }
 
     if (current) {
-      const width = current.clientWidth;
-      const padding = bodyPadding - 5;
-      const finalWidth = width - padding * 2;
+      const finalWidth = bounds.width;
 
-      if (Math.abs(size.width - finalWidth) < 20 || size.width === finalWidth) {
+      if (!finalWidth || Math.abs(size.width - finalWidth) < 12) {
         return;
       }
 

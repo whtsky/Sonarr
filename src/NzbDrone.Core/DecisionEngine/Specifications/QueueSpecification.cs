@@ -3,14 +3,13 @@ using NLog;
 using NzbDrone.Core.Configuration;
 using NzbDrone.Core.CustomFormats;
 using NzbDrone.Core.Download.TrackedDownloads;
-using NzbDrone.Core.IndexerSearch.Definitions;
 using NzbDrone.Core.Parser.Model;
 using NzbDrone.Core.Qualities;
 using NzbDrone.Core.Queue;
 
 namespace NzbDrone.Core.DecisionEngine.Specifications
 {
-    public class QueueSpecification : IDecisionEngineSpecification
+    public class QueueSpecification : IDownloadDecisionEngineSpecification
     {
         private readonly IQueueService _queueService;
         private readonly UpgradableSpecification _upgradableSpecification;
@@ -34,7 +33,7 @@ namespace NzbDrone.Core.DecisionEngine.Specifications
         public SpecificationPriority Priority => SpecificationPriority.Default;
         public RejectionType Type => RejectionType.Permanent;
 
-        public Decision IsSatisfiedBy(RemoteEpisode subject, SearchCriteriaBase searchCriteria)
+        public DownloadSpecDecision IsSatisfiedBy(RemoteEpisode subject, ReleaseDecisionInformation information)
         {
             var queue = _queueService.GetQueue();
             var matchingEpisode = queue.Where(q => q.RemoteEpisode?.Series != null &&
@@ -65,29 +64,39 @@ namespace NzbDrone.Core.DecisionEngine.Specifications
                     queuedItemCustomFormats,
                     subject.ParsedEpisodeInfo.Quality))
                 {
-                    return Decision.Reject("Release in queue already meets cutoff: {0}", remoteEpisode.ParsedEpisodeInfo.Quality);
+                    return DownloadSpecDecision.Reject(DownloadRejectionReason.QueueCutoffMet, "Release in queue already meets cutoff: {0}", remoteEpisode.ParsedEpisodeInfo.Quality);
                 }
 
                 _logger.Debug("Checking if release is higher quality than queued release. Queued: {0}", remoteEpisode.ParsedEpisodeInfo.Quality);
 
-                if (!_upgradableSpecification.IsUpgradable(qualityProfile,
-                                                           remoteEpisode.ParsedEpisodeInfo.Quality,
-                                                           queuedItemCustomFormats,
-                                                           subject.ParsedEpisodeInfo.Quality,
-                                                           subject.CustomFormats))
-                {
-                    return Decision.Reject("Release in queue is of equal or higher preference: {0}", remoteEpisode.ParsedEpisodeInfo.Quality);
-                }
+                var upgradeableRejectReason = _upgradableSpecification.IsUpgradable(qualityProfile,
+                    remoteEpisode.ParsedEpisodeInfo.Quality,
+                    queuedItemCustomFormats,
+                    subject.ParsedEpisodeInfo.Quality,
+                    subject.CustomFormats);
 
-                _logger.Debug("Checking if profiles allow upgrading. Queued: {0}", remoteEpisode.ParsedEpisodeInfo.Quality);
-
-                if (!_upgradableSpecification.IsUpgradeAllowed(subject.Series.QualityProfile,
-                                                               remoteEpisode.ParsedEpisodeInfo.Quality,
-                                                               queuedItemCustomFormats,
-                                                               subject.ParsedEpisodeInfo.Quality,
-                                                               subject.CustomFormats))
+                switch (upgradeableRejectReason)
                 {
-                    return Decision.Reject("Another release is queued and the Quality profile does not allow upgrades");
+                    case UpgradeableRejectReason.BetterQuality:
+                        return DownloadSpecDecision.Reject(DownloadRejectionReason.QueueHigherPreference, "Release in queue is of equal or higher preference: {0}", remoteEpisode.ParsedEpisodeInfo.Quality);
+
+                    case UpgradeableRejectReason.BetterRevision:
+                        return DownloadSpecDecision.Reject(DownloadRejectionReason.QueueHigherRevision, "Release in queue is of equal or higher revision: {0}", remoteEpisode.ParsedEpisodeInfo.Quality.Revision);
+
+                    case UpgradeableRejectReason.QualityCutoff:
+                        return DownloadSpecDecision.Reject(DownloadRejectionReason.QueueCutoffMet, "Release in queue meets quality cutoff: {0}", qualityProfile.Items[qualityProfile.GetIndex(qualityProfile.Cutoff).Index]);
+
+                    case UpgradeableRejectReason.CustomFormatCutoff:
+                        return DownloadSpecDecision.Reject(DownloadRejectionReason.QueueCustomFormatCutoffMet, "Release in queue meets Custom Format cutoff: {0}", qualityProfile.CutoffFormatScore);
+
+                    case UpgradeableRejectReason.CustomFormatScore:
+                        return DownloadSpecDecision.Reject(DownloadRejectionReason.QueueCustomFormatScore, "Release in queue has an equal or higher Custom Format score: {0}", qualityProfile.CalculateCustomFormatScore(queuedItemCustomFormats));
+
+                    case UpgradeableRejectReason.MinCustomFormatScore:
+                        return DownloadSpecDecision.Reject(DownloadRejectionReason.QueueCustomFormatScoreIncrement, "Release in queue has Custom Format score within Custom Format score increment: {0}", qualityProfile.MinUpgradeFormatScore);
+
+                    case UpgradeableRejectReason.UpgradesNotAllowed:
+                        return DownloadSpecDecision.Reject(DownloadRejectionReason.QueueUpgradesNotAllowed, "Release in queue and Quality Profile '{0}' does not allow upgrades", qualityProfile.Name);
                 }
 
                 if (_upgradableSpecification.IsRevisionUpgrade(remoteEpisode.ParsedEpisodeInfo.Quality, subject.ParsedEpisodeInfo.Quality))
@@ -95,12 +104,12 @@ namespace NzbDrone.Core.DecisionEngine.Specifications
                     if (_configService.DownloadPropersAndRepacks == ProperDownloadTypes.DoNotUpgrade)
                     {
                         _logger.Debug("Auto downloading of propers is disabled");
-                        return Decision.Reject("Proper downloading is disabled");
+                        return DownloadSpecDecision.Reject(DownloadRejectionReason.QueuePropersDisabled, "Proper downloading is disabled");
                     }
                 }
             }
 
-            return Decision.Accept();
+            return DownloadSpecDecision.Accept();
         }
     }
 }

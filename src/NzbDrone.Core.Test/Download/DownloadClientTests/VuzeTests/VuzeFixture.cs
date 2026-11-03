@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -60,7 +60,10 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.VuzeTests
         public void magnet_download_should_not_return_the_item()
         {
             PrepareClientToReturnMagnetItem();
-            Subject.GetItems().Count().Should().Be(0);
+
+            var item = Subject.GetItems().Single();
+
+            item.Status.Should().Be(DownloadItemStatus.Queued);
         }
 
         [Test]
@@ -301,6 +304,15 @@ namespace NzbDrone.Core.Test.Download.DownloadClientTests.VuzeTests
             Mocker.GetMock<ITransmissionProxy>()
                   .Setup(s => s.GetProtocolVersion(It.IsAny<TransmissionSettings>()))
                   .Returns(version);
+
+            Subject.Test().IsValid.Should().BeFalse();
+        }
+
+        [Test]
+        public void should_not_allow_category_and_directory()
+        {
+            GivenTvCategory();
+            GivenTvDirectory();
 
             Subject.Test().IsValid.Should().BeFalse();
         }

@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using NzbDrone.Core.AutoTagging;
+using NzbDrone.Core.AutoTagging.Specifications;
 using NzbDrone.Core.Datastore;
 using NzbDrone.Core.Download;
 using NzbDrone.Core.ImportLists;
@@ -90,7 +91,8 @@ namespace NzbDrone.Core.Tags
             var delayProfiles = _delayProfileService.AllForTag(tagId);
             var importLists = _importListFactory.AllForTag(tagId);
             var notifications = _notificationFactory.AllForTag(tagId);
-            var restrictions = _releaseProfileService.AllForTag(tagId);
+            var releaseProfiles = _releaseProfileService.AllForTag(tagId);
+            var excludedReleaseProfiles = _releaseProfileService.AllExcludedForTag(tagId);
             var series = _seriesService.AllForTag(tagId);
             var indexers = _indexerService.AllForTag(tagId);
             var autoTags = _autoTaggingService.AllForTag(tagId);
@@ -103,7 +105,8 @@ namespace NzbDrone.Core.Tags
                 DelayProfileIds = delayProfiles.Select(c => c.Id).ToList(),
                 ImportListIds = importLists.Select(c => c.Id).ToList(),
                 NotificationIds = notifications.Select(c => c.Id).ToList(),
-                RestrictionIds = restrictions.Select(c => c.Id).ToList(),
+                RestrictionIds = releaseProfiles.Select(c => c.Id).ToList(),
+                ExcludedReleaseProfileIds = excludedReleaseProfiles.Select(c => c.Id).ToList(),
                 SeriesIds = series.Select(c => c.Id).ToList(),
                 IndexerIds = indexers.Select(c => c.Id).ToList(),
                 AutoTagIds = autoTags.Select(c => c.Id).ToList(),
@@ -117,10 +120,11 @@ namespace NzbDrone.Core.Tags
             var delayProfiles = _delayProfileService.All();
             var importLists = _importListFactory.All();
             var notifications = _notificationFactory.All();
-            var restrictions = _releaseProfileService.All();
+            var releaseProfiles = _releaseProfileService.All();
+            var excludedReleaseProfiles = _releaseProfileService.All();
             var series = _seriesService.GetAllSeriesTags();
             var indexers = _indexerService.All();
-            var autotags = _autoTaggingService.All();
+            var autoTags = _autoTaggingService.All();
             var downloadClients = _downloadClientFactory.All();
 
             var details = new List<TagDetails>();
@@ -134,10 +138,11 @@ namespace NzbDrone.Core.Tags
                         DelayProfileIds = delayProfiles.Where(c => c.Tags.Contains(tag.Id)).Select(c => c.Id).ToList(),
                         ImportListIds = importLists.Where(c => c.Tags.Contains(tag.Id)).Select(c => c.Id).ToList(),
                         NotificationIds = notifications.Where(c => c.Tags.Contains(tag.Id)).Select(c => c.Id).ToList(),
-                        RestrictionIds = restrictions.Where(c => c.Tags.Contains(tag.Id)).Select(c => c.Id).ToList(),
+                        RestrictionIds = releaseProfiles.Where(c => c.Tags.Contains(tag.Id)).Select(c => c.Id).ToList(),
+                        ExcludedReleaseProfileIds = excludedReleaseProfiles.Where(c => c.ExcludedTags.Contains(tag.Id)).Select(c => c.Id).ToList(),
                         SeriesIds = series.Where(c => c.Value.Contains(tag.Id)).Select(c => c.Key).ToList(),
                         IndexerIds = indexers.Where(c => c.Tags.Contains(tag.Id)).Select(c => c.Id).ToList(),
-                        AutoTagIds = autotags.Where(c => c.Tags.Contains(tag.Id)).Select(c => c.Id).ToList(),
+                        AutoTagIds = GetAutoTagIds(tag, autoTags),
                         DownloadClientIds = downloadClients.Where(c => c.Tags.Contains(tag.Id)).Select(c => c.Id).ToList(),
                     });
             }
@@ -187,6 +192,24 @@ namespace NzbDrone.Core.Tags
 
             _repo.Delete(tagId);
             _eventAggregator.PublishEvent(new TagsUpdatedEvent());
+        }
+
+        private List<int> GetAutoTagIds(Tag tag, List<AutoTag> autoTags)
+        {
+            var autoTagIds = autoTags.Where(c => c.Tags.Contains(tag.Id)).Select(c => c.Id).ToList();
+
+            foreach (var autoTag in autoTags)
+            {
+                foreach (var specification in autoTag.Specifications)
+                {
+                    if (specification is TagSpecification tagSpecification && tagSpecification.Value == tag.Id)
+                    {
+                        autoTagIds.Add(autoTag.Id);
+                    }
+                }
+            }
+
+            return autoTagIds.Distinct().ToList();
         }
     }
 }

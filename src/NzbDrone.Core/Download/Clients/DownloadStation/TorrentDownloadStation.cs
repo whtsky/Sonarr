@@ -88,7 +88,7 @@ namespace NzbDrone.Core.Download.Clients.DownloadStation
                     }
                 }
 
-                var item = new DownloadClientItem()
+                var item = new DownloadClientItem
                 {
                     Category = Settings.TvCategory,
                     DownloadClientInfo = DownloadClientItemClientInfo.FromDownloadClient(this, false),
@@ -99,10 +99,10 @@ namespace NzbDrone.Core.Download.Clients.DownloadStation
                     RemainingTime = GetRemainingTime(torrent),
                     SeedRatio = GetSeedRatio(torrent),
                     Status = GetStatus(torrent),
-                    Message = GetMessage(torrent),
-                    CanMoveFiles = IsFinished(torrent),
-                    CanBeRemoved = IsFinished(torrent)
+                    Message = GetMessage(torrent)
                 };
+
+                item.CanMoveFiles = item.CanBeRemoved = item.DownloadClientInfo.RemoveCompletedDownloads && IsFinished(torrent);
 
                 if (item.Status == DownloadItemStatus.Completed || item.Status == DownloadItemStatus.Failed)
                 {
@@ -129,7 +129,7 @@ namespace NzbDrone.Core.Download.Clients.DownloadStation
 
                 return new DownloadClientInfo
                 {
-                    IsLocalhost = Settings.Host == "127.0.0.1" || Settings.Host == "localhost",
+                    IsLocalhost = Settings.Host.IsLocalhostAddress(),
                     OutputRootFolders = new List<OsPath> { _remotePathMappingService.RemapRemoteToLocal(Settings.Host, fullPath) }
                 };
             }

@@ -1,0 +1,620 @@
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useAppDimension } from 'App/appStore';
+import CommandNames from 'Commands/CommandNames';
+import { useCommands, useExecuteCommand } from 'Commands/useCommands';
+import Icon from 'Components/Icon';
+import Label from 'Components/Label';
+import IconButton from 'Components/Link/IconButton';
+import Link from 'Components/Link/Link';
+import SpinnerIconButton from 'Components/Link/SpinnerIconButton';
+import Menu from 'Components/Menu/Menu';
+import MenuButton from 'Components/Menu/MenuButton';
+import MenuContent from 'Components/Menu/MenuContent';
+import MenuItem from 'Components/Menu/MenuItem';
+import MonitorToggleButton from 'Components/MonitorToggleButton';
+import SpinnerIcon from 'Components/SpinnerIcon';
+import Table from 'Components/Table/Table';
+import TableBody from 'Components/Table/TableBody';
+import Popover from 'Components/Tooltip/Popover';
+import Episode from 'Episode/Episode';
+import {
+  setEpisodeOptions,
+  setEpisodeSort,
+  useEpisodeOptions,
+} from 'Episode/episodeOptionsStore';
+import { getQueryKey, useToggleEpisodesMonitored } from 'Episode/useEpisode';
+import { useSeasonEpisodes } from 'Episode/useEpisodes';
+import usePrevious from 'Helpers/Hooks/usePrevious';
+import { align, icons, tooltipPositions } from 'Helpers/Props';
+import { SortDirection } from 'Helpers/Props/sortDirections';
+import InteractiveImportModal from 'InteractiveImport/InteractiveImportModal';
+import { manageEpisodesOptionsStore } from 'InteractiveImport/interactiveImportOptionsStore';
+import OrganizePreviewModal from 'Organize/OrganizePreviewModal';
+import SeriesHistoryModal from 'Series/History/SeriesHistoryModal';
+import SeasonInteractiveSearchModal from 'Series/Search/SeasonInteractiveSearchModal';
+import { Statistics } from 'Series/Series';
+import { useSingleSeries, useToggleSeasonMonitored } from 'Series/useSeries';
+import { TableOptionsChangePayload } from 'typings/Table';
+import { findCommand, isCommandExecuting } from 'Utilities/Command';
+import isAfter from 'Utilities/Date/isAfter';
+import isBefore from 'Utilities/Date/isBefore';
+import formatBytes from 'Utilities/Number/formatBytes';
+import translate from 'Utilities/String/translate';
+import getToggledRange from 'Utilities/Table/getToggledRange';
+import EpisodeRow from './EpisodeRow';
+import SeasonInfo from './SeasonInfo';
+import SeasonProgressLabel from './SeasonProgressLabel';
+import styles from './SeriesDetailsSeason.module.css';
+
+function getSeasonStatistics(episodes: Episode[]) {
+  let episodeCount = 0;
+  let episodeFileCount = 0;
+  let totalEpisodeCount = 0;
+  let monitoredEpisodeCount = 0;
+  let hasMonitoredEpisodes = false;
+  const sizeOnDisk = 0;
+
+  episodes.forEach((episode) => {
+    if (
+      episode.episodeFileId ||
+      (episode.monitored && isBefore(episode.airDateUtc))
+    ) {
+      episodeCount++;
+    }
+
+    if (episode.episodeFileId) {
+      episodeFileCount++;
+    }
+
+    if (episode.monitored) {
+      monitoredEpisodeCount++;
+      hasMonitoredEpisodes = true;
+    }
+
+    totalEpisodeCount++;
+  });
+
+  return {
+    episodeCount,
+    episodeFileCount,
+    totalEpisodeCount,
+    monitoredEpisodeCount,
+    hasMonitoredEpisodes,
+    sizeOnDisk,
+  };
+}
+
+function useIsSearching(seriesId: number, seasonNumber: number) {
+  const { data: commands } = useCommands();
+  return isCommandExecuting(
+    findCommand(commands, {
+      name: CommandNames.SeasonSearch,
+      seriesId,
+      seasonNumber,
+    })
+  );
+}
+
+interface SeriesDetailsSeasonProps {
+  seriesId: number;
+  monitored: boolean;
+  seasonNumber: number;
+  statistics?: Statistics;
+  title?: string;
+  isExpanded?: boolean;
+  onExpandPress: (seasonNumber: number, isExpanded: boolean) => void;
+}
+
+function SeriesDetailsSeason({
+  seriesId,
+  monitored,
+  seasonNumber,
+  statistics = {} as Statistics,
+  title,
+  isExpanded,
+  onExpandPress,
+}: SeriesDetailsSeasonProps) {
+  const executeCommand = useExecuteCommand();
+  const { monitored: seriesMonitored, path } = useSingleSeries(seriesId)!;
+  const { data: items } = useSeasonEpisodes(seriesId, seasonNumber);
+
+  const { columns, sortKey, sortDirection } = useEpisodeOptions();
+
+  const isSmallScreen = useAppDimension('isSmallScreen');
+  const isSearching = useIsSearching(seriesId, seasonNumber);
+
+  const { sizeOnDisk = 0 } = statistics;
+
+  const {
+    episodeCount,
+    episodeFileCount,
+    totalEpisodeCount,
+    monitoredEpisodeCount,
+    hasMonitoredEpisodes,
+  } = getSeasonStatistics(items);
+
+  const previousEpisodeFileCount = usePrevious(episodeFileCount);
+
+  const [isOrganizeModalOpen, setIsOrganizeModalOpen] = useState(false);
+  const [isManageEpisodesOpen, setIsManageEpisodesOpen] = useState(false);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [isInteractiveSearchModalOpen, setIsInteractiveSearchModalOpen] =
+    useState(false);
+
+  const { toggleEpisodesMonitored, isToggling, togglingEpisodeIds } =
+    useToggleEpisodesMonitored(getQueryKey('episodes')!);
+
+  const { toggleSeasonMonitored, isTogglingSeasonMonitored } =
+    useToggleSeasonMonitored(seriesId);
+
+  const lastToggledEpisode = useRef<number | null>(null);
+  const hasSetInitalExpand = useRef(false);
+
+  const seasonNumberTitle =
+    seasonNumber === 0
+      ? translate('Specials')
+      : translate('SeasonNumberToken', { seasonNumber });
+  const seasonActionsLabel = translate('SeasonActions', {
+    season: seasonNumberTitle,
+  });
+  const showEpisodesLabel = translate('ShowEpisodesForSeason', {
+    season: seasonNumberTitle,
+  });
+  const hideEpisodesLabel = translate('HideEpisodesForSeason', {
+    season: seasonNumberTitle,
+  });
+  const monitorSeasonLabel = translate(
+    monitored ? 'StopMonitoringSeason' : 'MonitorSeason',
+    { season: seasonNumberTitle }
+  );
+  const searchSeasonLabel = translate('SearchForMonitoredEpisodesInSeason', {
+    season: seasonNumberTitle,
+  });
+  const noMonitoredEpisodesLabel = translate('NoMonitoredEpisodesInSeason', {
+    season: seasonNumberTitle,
+  });
+  const interactiveSearchLabel = translate('InteractiveSearchForSeason', {
+    season: seasonNumberTitle,
+  });
+  const previewRenameLabel = translate('PreviewRenameForSeason', {
+    season: seasonNumberTitle,
+  });
+  const manageEpisodesLabel = translate('ManageEpisodeFilesForSeason', {
+    season: seasonNumberTitle,
+  });
+  const historyLabel = translate('ViewHistoryForSeason', {
+    season: seasonNumberTitle,
+  });
+
+  const handleMonitorSeasonPress = useCallback(
+    (value: boolean) => {
+      toggleSeasonMonitored({
+        seasonNumber,
+        monitored: value,
+      });
+    },
+    [seasonNumber, toggleSeasonMonitored]
+  );
+
+  const handleExpandPress = useCallback(() => {
+    onExpandPress(seasonNumber, !isExpanded);
+  }, [seasonNumber, isExpanded, onExpandPress]);
+
+  const handleMonitorEpisodePress = useCallback(
+    (
+      episodeId: number,
+      value: boolean,
+      { shiftKey }: { shiftKey: boolean }
+    ) => {
+      const lastToggled = lastToggledEpisode.current;
+      const episodeIds = new Set([episodeId]);
+
+      if (shiftKey && lastToggled) {
+        const { lower, upper } = getToggledRange(items, episodeId, lastToggled);
+
+        for (let i = lower; i < upper; i++) {
+          episodeIds.add(items[i].id);
+        }
+      }
+
+      lastToggledEpisode.current = episodeId;
+
+      toggleEpisodesMonitored({
+        episodeIds: Array.from(episodeIds),
+        monitored: value,
+      });
+    },
+    [items, toggleEpisodesMonitored]
+  );
+
+  const handleSearchPress = useCallback(() => {
+    executeCommand({
+      name: CommandNames.SeasonSearch,
+      seriesId,
+      seasonNumber,
+    });
+  }, [seriesId, seasonNumber, executeCommand]);
+
+  const handleOrganizePress = useCallback(() => {
+    setIsOrganizeModalOpen(true);
+  }, []);
+
+  const handleOrganizeModalClose = useCallback(() => {
+    setIsOrganizeModalOpen(false);
+  }, []);
+
+  const handleManageEpisodesPress = useCallback(() => {
+    setIsManageEpisodesOpen(true);
+  }, []);
+
+  const handleManageEpisodesModalClose = useCallback(() => {
+    setIsManageEpisodesOpen(false);
+  }, []);
+
+  const handleHistoryPress = useCallback(() => {
+    setIsHistoryModalOpen(true);
+  }, []);
+
+  const handleHistoryModalClose = useCallback(() => {
+    setIsHistoryModalOpen(false);
+  }, []);
+
+  const handleInteractiveSearchPress = useCallback(() => {
+    setIsInteractiveSearchModalOpen(true);
+  }, []);
+
+  const handleInteractiveSearchModalClose = useCallback(() => {
+    setIsInteractiveSearchModalOpen(false);
+  }, []);
+
+  const handleSortPress = useCallback(
+    (sortKey: string, sortDirection?: SortDirection) => {
+      setEpisodeSort({
+        sortKey,
+        sortDirection,
+      });
+    },
+    []
+  );
+
+  const handleTableOptionChange = useCallback(
+    (payload: TableOptionsChangePayload) => {
+      setEpisodeOptions(payload);
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (hasSetInitalExpand.current || items.length === 0) {
+      return;
+    }
+
+    hasSetInitalExpand.current = true;
+
+    const expand =
+      items.some(
+        (item) =>
+          isAfter(item.airDateUtc) || isAfter(item.airDateUtc, { days: -30 })
+      ) || items.every((item) => !item.airDateUtc);
+
+    onExpandPress(seasonNumber, expand && seasonNumber > 0);
+  }, [items, seriesId, seasonNumber, onExpandPress]);
+
+  useEffect(() => {
+    if ((previousEpisodeFileCount ?? 0) > 0 && episodeFileCount === 0) {
+      setIsOrganizeModalOpen(false);
+      setIsManageEpisodesOpen(false);
+    }
+  }, [episodeFileCount, previousEpisodeFileCount]);
+
+  return (
+    <div className={styles.season}>
+      <div className={styles.header}>
+        <div className={styles.left}>
+          <MonitorToggleButton
+            monitored={monitored}
+            isDisabled={!seriesMonitored && !monitored}
+            isSaving={isTogglingSeasonMonitored}
+            size={24}
+            title={monitorSeasonLabel}
+            onPress={handleMonitorSeasonPress}
+          />
+
+          <div className={styles.seasonInfo}>
+            <div className={styles.seasonNumber}>{seasonNumberTitle}</div>
+            {title ? (
+              <div className={styles.seasonTitle} title={title}>
+                {title}
+              </div>
+            ) : null}
+          </div>
+
+          <div className={styles.seasonStats}>
+            <Popover
+              className={styles.episodeCountTooltip}
+              canFlip={true}
+              anchor={
+                <SeasonProgressLabel
+                  className={styles.seasonStatsLabel}
+                  seriesId={seriesId}
+                  seasonNumber={seasonNumber}
+                  monitored={monitored}
+                  episodeCount={episodeCount}
+                  episodeFileCount={episodeFileCount}
+                />
+              }
+              title={translate('SeasonInformation')}
+              body={
+                <div>
+                  <SeasonInfo
+                    totalEpisodeCount={totalEpisodeCount}
+                    monitoredEpisodeCount={monitoredEpisodeCount}
+                    episodeFileCount={episodeFileCount}
+                    sizeOnDisk={sizeOnDisk}
+                  />
+                </div>
+              }
+              position={tooltipPositions.BOTTOM}
+            />
+
+            {sizeOnDisk ? (
+              <Label
+                className={styles.seasonStatsLabel}
+                kind="default"
+                size="large"
+              >
+                {formatBytes(sizeOnDisk)}
+              </Label>
+            ) : null}
+          </div>
+        </div>
+
+        <Link
+          className={styles.expandButton}
+          aria-label={isExpanded ? hideEpisodesLabel : showEpisodesLabel}
+          onPress={handleExpandPress}
+        >
+          <Icon
+            className={styles.expandButtonIcon}
+            name={isExpanded ? icons.COLLAPSE : icons.EXPAND}
+            title={isExpanded ? hideEpisodesLabel : showEpisodesLabel}
+            size={24}
+          />
+          {isSmallScreen ? null : <span>&nbsp;</span>}
+        </Link>
+
+        {isSmallScreen ? (
+          <Menu
+            className={styles.actionsMenu}
+            alignMenu={align.RIGHT}
+            enforceMaxHeight={false}
+          >
+            <MenuButton
+              className={styles.actionsMenuButton}
+              aria-label={seasonActionsLabel}
+            >
+              <Icon name={icons.ACTIONS} size={22} />
+            </MenuButton>
+
+            <MenuContent className={styles.actionsMenuContent}>
+              <MenuItem
+                isDisabled={
+                  isSearching || !hasMonitoredEpisodes || !seriesMonitored
+                }
+                aria-label={
+                  hasMonitoredEpisodes && seriesMonitored
+                    ? searchSeasonLabel
+                    : noMonitoredEpisodesLabel
+                }
+                onPress={handleSearchPress}
+              >
+                <SpinnerIcon
+                  className={styles.actionMenuIcon}
+                  name={icons.SEARCH}
+                  isSpinning={isSearching}
+                />
+
+                {translate('Search')}
+              </MenuItem>
+
+              <MenuItem
+                isDisabled={!totalEpisodeCount}
+                aria-label={interactiveSearchLabel}
+                onPress={handleInteractiveSearchPress}
+              >
+                <Icon
+                  className={styles.actionMenuIcon}
+                  name={icons.INTERACTIVE}
+                />
+
+                {translate('InteractiveSearch')}
+              </MenuItem>
+
+              <MenuItem
+                isDisabled={!episodeFileCount}
+                aria-label={previewRenameLabel}
+                onPress={handleOrganizePress}
+              >
+                <Icon className={styles.actionMenuIcon} name={icons.ORGANIZE} />
+
+                {translate('PreviewRename')}
+              </MenuItem>
+
+              <MenuItem
+                isDisabled={!episodeFileCount}
+                aria-label={manageEpisodesLabel}
+                onPress={handleManageEpisodesPress}
+              >
+                <Icon
+                  className={styles.actionMenuIcon}
+                  name={icons.EPISODE_FILE}
+                />
+
+                {translate('ManageEpisodes')}
+              </MenuItem>
+
+              <MenuItem
+                isDisabled={!totalEpisodeCount}
+                aria-label={historyLabel}
+                onPress={handleHistoryPress}
+              >
+                <Icon className={styles.actionMenuIcon} name={icons.HISTORY} />
+
+                {translate('History')}
+              </MenuItem>
+            </MenuContent>
+          </Menu>
+        ) : (
+          <div className={styles.actions}>
+            <SpinnerIconButton
+              className={styles.actionButton}
+              name={icons.SEARCH}
+              title={
+                hasMonitoredEpisodes && seriesMonitored
+                  ? searchSeasonLabel
+                  : noMonitoredEpisodesLabel
+              }
+              aria-label={
+                hasMonitoredEpisodes && seriesMonitored
+                  ? searchSeasonLabel
+                  : noMonitoredEpisodesLabel
+              }
+              size={20}
+              isSpinning={isSearching}
+              isDisabled={
+                isSearching || !hasMonitoredEpisodes || !seriesMonitored
+              }
+              onPress={handleSearchPress}
+            />
+
+            <IconButton
+              className={styles.actionButton}
+              name={icons.INTERACTIVE}
+              title={interactiveSearchLabel}
+              aria-label={interactiveSearchLabel}
+              size={20}
+              isDisabled={!totalEpisodeCount}
+              onPress={handleInteractiveSearchPress}
+            />
+
+            <IconButton
+              className={styles.actionButton}
+              name={icons.ORGANIZE}
+              title={previewRenameLabel}
+              aria-label={previewRenameLabel}
+              size={20}
+              isDisabled={!episodeFileCount}
+              onPress={handleOrganizePress}
+            />
+
+            <IconButton
+              className={styles.actionButton}
+              name={icons.EPISODE_FILE}
+              title={manageEpisodesLabel}
+              aria-label={manageEpisodesLabel}
+              size={20}
+              isDisabled={!episodeFileCount}
+              onPress={handleManageEpisodesPress}
+            />
+
+            <IconButton
+              className={styles.actionButton}
+              name={icons.HISTORY}
+              title={historyLabel}
+              aria-label={historyLabel}
+              size={20}
+              isDisabled={!totalEpisodeCount}
+              onPress={handleHistoryPress}
+            />
+          </div>
+        )}
+      </div>
+
+      <div>
+        {isExpanded ? (
+          <div className={styles.episodes}>
+            {items.length ? (
+              <Table
+                columns={columns}
+                sortKey={sortKey}
+                sortDirection={sortDirection}
+                onSortPress={handleSortPress}
+                onTableOptionChange={handleTableOptionChange}
+              >
+                <TableBody>
+                  {items.map((item) => {
+                    return (
+                      <EpisodeRow
+                        key={item.id}
+                        columns={columns}
+                        {...item}
+                        isSaving={
+                          isToggling && togglingEpisodeIds.includes(item.id)
+                        }
+                        onMonitorEpisodePress={handleMonitorEpisodePress}
+                      />
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className={styles.noEpisodes}>
+                {translate('NoEpisodesInThisSeason')}
+              </div>
+            )}
+
+            <div className={styles.collapseButtonContainer}>
+              <IconButton
+                iconClassName={styles.collapseButtonIcon}
+                name={icons.COLLAPSE}
+                size={20}
+                title={hideEpisodesLabel}
+                aria-label={hideEpisodesLabel}
+                onPress={handleExpandPress}
+              />
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      <OrganizePreviewModal
+        isOpen={isOrganizeModalOpen}
+        seriesId={seriesId}
+        seasonNumber={seasonNumber}
+        onModalClose={handleOrganizeModalClose}
+      />
+
+      <InteractiveImportModal
+        isOpen={isManageEpisodesOpen}
+        seriesId={seriesId}
+        seasonNumber={seasonNumber}
+        title={seasonNumberTitle}
+        folder={path}
+        optionsStore={manageEpisodesOptionsStore}
+        showSeries={false}
+        allowSeriesChange={false}
+        showDelete={true}
+        showImportMode={false}
+        modalTitle={translate('ManageEpisodes')}
+        onModalClose={handleManageEpisodesModalClose}
+      />
+
+      <SeriesHistoryModal
+        isOpen={isHistoryModalOpen}
+        seriesId={seriesId}
+        seasonNumber={seasonNumber}
+        onModalClose={handleHistoryModalClose}
+      />
+
+      <SeasonInteractiveSearchModal
+        isOpen={isInteractiveSearchModalOpen}
+        episodeCount={totalEpisodeCount}
+        seriesId={seriesId}
+        seasonNumber={seasonNumber}
+        onModalClose={handleInteractiveSearchModalClose}
+      />
+    </div>
+  );
+}
+
+export default SeriesDetailsSeason;

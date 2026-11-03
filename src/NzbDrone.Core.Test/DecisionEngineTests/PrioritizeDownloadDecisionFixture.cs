@@ -22,21 +22,35 @@ namespace NzbDrone.Core.Test.DecisionEngineTests
     [TestFixture]
     public class PrioritizeDownloadDecisionFixture : CoreTest<DownloadDecisionPriorizationService>
     {
+        private Series _series;
+
         [SetUp]
         public void Setup()
         {
             GivenPreferredDownloadProtocol(DownloadProtocol.Usenet);
 
-            Mocker.GetMock<IQualityDefinitionService>()
-                .Setup(s => s.Get(It.IsAny<Quality>()))
-                .Returns(new QualityDefinition { PreferredSize = null });
+            _series = Builder<Series>.CreateNew()
+                .With(e => e.Runtime = 60)
+                .With(e => e.QualityProfile = new QualityProfile
+                {
+                    Items = Qualities.QualityFixture.GetDefaultQualities()
+                })
+                .Build();
         }
 
-        private void GivenPreferredSize(double? size)
+        private void GivenPreferredSize(QualityProfile qualityProfile, double? size)
         {
-            Mocker.GetMock<IQualityDefinitionService>()
-                .Setup(s => s.Get(It.IsAny<Quality>()))
-                .Returns(new QualityDefinition { PreferredSize = size });
+            foreach (var qualityOrGroup in qualityProfile.Items)
+            {
+                if (qualityOrGroup.Quality != null)
+                {
+                    qualityOrGroup.PreferredSize = size;
+                }
+                else
+                {
+                    qualityOrGroup.Items.ForEach(i => i.PreferredSize = size);
+                }
+            }
         }
 
         private Episode GivenEpisode(int id)
@@ -44,6 +58,7 @@ namespace NzbDrone.Core.Test.DecisionEngineTests
             return Builder<Episode>.CreateNew()
                             .With(e => e.Id = id)
                             .With(e => e.EpisodeNumber = id)
+                            .With(e => e.Runtime = 0)
                             .Build();
         }
 
@@ -63,13 +78,7 @@ namespace NzbDrone.Core.Test.DecisionEngineTests
             remoteEpisode.Release.DownloadProtocol = downloadProtocol;
             remoteEpisode.Release.IndexerPriority = indexerPriority;
 
-            remoteEpisode.Series = Builder<Series>.CreateNew()
-                                                  .With(e => e.Runtime = 60)
-                                                  .With(e => e.QualityProfile = new QualityProfile
-                                                  {
-                                                      Items = Qualities.QualityFixture.GetDefaultQualities()
-                                                  })
-                                                  .Build();
+            remoteEpisode.Series = _series;
 
             return remoteEpisode;
         }
@@ -176,7 +185,7 @@ namespace NzbDrone.Core.Test.DecisionEngineTests
         public void should_order_by_closest_to_preferred_size_if_both_under()
         {
             // 200 MB/Min * 60 Min Runtime = 12000 MB
-            GivenPreferredSize(200);
+            GivenPreferredSize(_series.QualityProfile.Value, 200);
 
             var remoteEpisodeSmall = GivenRemoteEpisode(new List<Episode> { GivenEpisode(1) }, new QualityModel(Quality.HDTV720p), Language.English, size: 1200.Megabytes(), age: 1);
             var remoteEpisodeLarge = GivenRemoteEpisode(new List<Episode> { GivenEpisode(1) }, new QualityModel(Quality.HDTV720p), Language.English, size: 10000.Megabytes(), age: 1);
@@ -193,7 +202,7 @@ namespace NzbDrone.Core.Test.DecisionEngineTests
         public void should_order_by_closest_to_preferred_size_if_preferred_is_in_between()
         {
             // 46 MB/Min * 60 Min Runtime = 6900 MB
-            GivenPreferredSize(46);
+            GivenPreferredSize(_series.QualityProfile.Value, 46);
 
             var remoteEpisode1 = GivenRemoteEpisode(new List<Episode> { GivenEpisode(1) }, new QualityModel(Quality.HDTV720p), Language.English, size: 500.Megabytes(), age: 1);
             var remoteEpisode2 = GivenRemoteEpisode(new List<Episode> { GivenEpisode(1) }, new QualityModel(Quality.HDTV720p), Language.English, size: 2000.Megabytes(), age: 1);
@@ -208,6 +217,29 @@ namespace NzbDrone.Core.Test.DecisionEngineTests
 
             var qualifiedReports = Subject.PrioritizeDecisions(decisions);
             qualifiedReports.First().RemoteEpisode.Should().Be(remoteEpisode3);
+        }
+
+        [Test]
+        public void should_order_by_closest_to_preferred_size_of_the_whole_release()
+        {
+            // 46 MB/Min * (10 episodes * 60 Min Runtime) = 27600 MB
+            GivenPreferredSize(_series.QualityProfile.Value, 46);
+
+            var episodes = Builder<Episode>.CreateListOfSize(10)
+                                           .All()
+                                           .With(e => e.Runtime = 60)
+                                           .Build()
+                                           .ToList();
+
+            var remoteEpisodeSmall = GivenRemoteEpisode(episodes, new QualityModel(Quality.HDTV720p), Language.English, size: 12000.Megabytes(), age: 1);
+            var remoteEpisodeLarge = GivenRemoteEpisode(episodes, new QualityModel(Quality.HDTV720p), Language.English, size: 26000.Megabytes(), age: 1);
+
+            var decisions = new List<DownloadDecision>();
+            decisions.Add(new DownloadDecision(remoteEpisodeSmall));
+            decisions.Add(new DownloadDecision(remoteEpisodeLarge));
+
+            var qualifiedReports = Subject.PrioritizeDecisions(decisions);
+            qualifiedReports.First().RemoteEpisode.Should().Be(remoteEpisodeLarge);
         }
 
         [Test]

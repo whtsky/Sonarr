@@ -21,6 +21,7 @@ namespace NzbDrone.Core.Profiles.Qualities
         QualityProfile Get(int id);
         bool Exists(int id);
         QualityProfile GetDefaultProfile(string name, Quality cutoff = null, params Quality[] allowed);
+        void UpdateAllSizeLimits(params QualityProfileSizeLimit[] sizeLimits);
     }
 
     public class QualityProfileService : IQualityProfileService,
@@ -32,29 +33,39 @@ namespace NzbDrone.Core.Profiles.Qualities
         private readonly IImportListFactory _importListFactory;
         private readonly ICustomFormatService _formatService;
         private readonly ISeriesService _seriesService;
+        private readonly IQualityProfileRankService _rankService;
+        private readonly IEventAggregator _eventAggregator;
         private readonly Logger _logger;
 
         public QualityProfileService(IQualityProfileRepository qualityProfileRepository,
                                      IImportListFactory importListFactory,
                                      ICustomFormatService formatService,
                                      ISeriesService seriesService,
+                                     IQualityProfileRankService rankService,
+                                     IEventAggregator eventAggregator,
                                      Logger logger)
         {
             _qualityProfileRepository = qualityProfileRepository;
             _importListFactory = importListFactory;
             _formatService = formatService;
             _seriesService = seriesService;
+            _rankService = rankService;
+            _eventAggregator = eventAggregator;
             _logger = logger;
         }
 
         public QualityProfile Add(QualityProfile profile)
         {
-            return _qualityProfileRepository.Insert(profile);
+            var saved = _qualityProfileRepository.Insert(profile);
+            _rankService.UpdateRanksForProfile(saved);
+            return saved;
         }
 
         public void Update(QualityProfile profile)
         {
             _qualityProfileRepository.Update(profile);
+            _rankService.UpdateRanksForProfile(profile);
+            _eventAggregator.PublishEvent(new QualityProfileUpdatedEvent(profile.Id));
         }
 
         public void Delete(int id)
@@ -66,6 +77,7 @@ namespace NzbDrone.Core.Profiles.Qualities
             }
 
             _qualityProfileRepository.Delete(id);
+            _rankService.DeleteRanksForProfile(id);
         }
 
         public List<QualityProfile> All()
@@ -85,8 +97,12 @@ namespace NzbDrone.Core.Profiles.Qualities
 
         public void Handle(ApplicationStartedEvent message)
         {
-            if (All().Any())
+            var profiles = All();
+
+            if (profiles.Any())
             {
+                _rankService.SeedAll(profiles);
+
                 return;
             }
 
@@ -98,6 +114,8 @@ namespace NzbDrone.Core.Profiles.Qualities
                 Quality.WEBRip480p,
                 Quality.WEBDL480p,
                 Quality.DVD,
+                Quality.Bluray480p,
+                Quality.Bluray576p,
                 Quality.HDTV720p,
                 Quality.HDTV1080p,
                 Quality.WEBRip720p,
@@ -112,7 +130,9 @@ namespace NzbDrone.Core.Profiles.Qualities
                 Quality.SDTV,
                 Quality.WEBRip480p,
                 Quality.WEBDL480p,
-                Quality.DVD);
+                Quality.DVD,
+                Quality.Bluray480p,
+                Quality.Bluray576p);
 
             AddDefaultProfile("HD-720p",
                 Quality.HDTV720p,
@@ -174,6 +194,7 @@ namespace NzbDrone.Core.Profiles.Qualities
                 {
                     profile.MinFormatScore = 0;
                     profile.CutoffFormatScore = 0;
+                    profile.MinUpgradeFormatScore = 1;
                 }
 
                 Update(profile);
@@ -193,7 +214,14 @@ namespace NzbDrone.Core.Profiles.Qualities
                 {
                     var quality = group.First().Quality;
 
-                    items.Add(new QualityProfileQualityItem { Quality = group.First().Quality, Allowed = allowed.Contains(quality) });
+                    items.Add(new QualityProfileQualityItem
+                    {
+                        Quality = group.First().Quality,
+                        Allowed = allowed.Contains(quality),
+                        MinSize = group.First().MinSize,
+                        MaxSize = group.First().MaxSize,
+                        PreferredSize = group.First().PreferredSize
+                    });
                     continue;
                 }
 
@@ -206,7 +234,10 @@ namespace NzbDrone.Core.Profiles.Qualities
                     Items = group.Select(g => new QualityProfileQualityItem
                     {
                         Quality = g.Quality,
-                        Allowed = groupAllowed
+                        Allowed = groupAllowed,
+                        MinSize = g.MinSize,
+                        MaxSize = g.MaxSize,
+                        PreferredSize = g.PreferredSize
                     }).ToList(),
                     Allowed = groupAllowed
                 });
@@ -232,10 +263,32 @@ namespace NzbDrone.Core.Profiles.Qualities
                                      Items = items,
                                      MinFormatScore = 0,
                                      CutoffFormatScore = 0,
+                                     MinUpgradeFormatScore = 1,
                                      FormatItems = formatItems
                                  };
 
             return qualityProfile;
+        }
+
+        public void UpdateAllSizeLimits(params QualityProfileSizeLimit[] sizeLimits)
+        {
+            var all = All();
+
+            foreach (var qualityProfile in all)
+            {
+                foreach (var sizeLimit in sizeLimits)
+                {
+                        var qualityIndex = qualityProfile.GetIndex(sizeLimit.Quality, true);
+                        var qualityOrGroup = qualityProfile.Items[qualityIndex.Index];
+                        var item = qualityOrGroup.Quality == null ? qualityOrGroup.Items[qualityIndex.GroupIndex] : qualityOrGroup;
+
+                        item.MinSize = sizeLimit.MinSize;
+                        item.MaxSize = sizeLimit.MaxSize;
+                        item.PreferredSize = sizeLimit.PreferredSize;
+                }
+            }
+
+            _qualityProfileRepository.UpdateMany(all);
         }
 
         private QualityProfile AddDefaultProfile(string name, Quality cutoff, params Quality[] allowed)

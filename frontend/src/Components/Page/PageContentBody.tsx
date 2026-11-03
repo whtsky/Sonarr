@@ -1,14 +1,14 @@
 import React, { ForwardedRef, forwardRef, ReactNode, useCallback } from 'react';
 import Scroller, { OnScroll } from 'Components/Scroller/Scroller';
-import ScrollDirection from 'Helpers/Props/ScrollDirection';
+import useScrollPosition from 'Helpers/Hooks/useScrollPosition';
 import { isLocked } from 'Utilities/scrollLock';
-import styles from './PageContentBody.css';
+import styles from './PageContentBody.module.css';
 
 interface PageContentBodyProps {
   className?: string;
   innerClassName?: string;
   children: ReactNode;
-  initialScrollTop?: number;
+  scrollPositionKey?: string;
   onScroll?: (payload: OnScroll) => void;
 }
 
@@ -18,26 +18,32 @@ const PageContentBody = forwardRef(
       className = styles.contentBody,
       innerClassName = styles.innerContentBody,
       children,
+      scrollPositionKey,
       onScroll,
-      ...otherProps
     } = props;
 
-    const onScrollWrapper = useCallback(
+    const { initialScrollTop, onScroll: onScrollMemo } =
+      useScrollPosition(scrollPositionKey);
+
+    const handleScroll = useCallback(
       (payload: OnScroll) => {
-        if (onScroll && !isLocked()) {
-          onScroll(payload);
+        if (isLocked()) {
+          return;
         }
+
+        onScrollMemo(payload);
+        onScroll?.(payload);
       },
-      [onScroll]
+      [onScroll, onScrollMemo]
     );
 
     return (
       <Scroller
         ref={ref}
-        {...otherProps}
         className={className}
-        scrollDirection={ScrollDirection.Vertical}
-        onScroll={onScrollWrapper}
+        scrollDirection="vertical"
+        initialScrollTop={initialScrollTop}
+        onScroll={handleScroll}
       >
         <div className={innerClassName}>{children}</div>
       </Scroller>

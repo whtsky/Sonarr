@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using FluentValidation.Results;
 using NLog;
 using NzbDrone.Common.Disk;
@@ -18,6 +19,8 @@ namespace NzbDrone.Core.Download.Clients.Transmission
 {
     public abstract class TransmissionBase : TorrentClientBase<TransmissionSettings>
     {
+        public abstract bool SupportsLabels { get; }
+
         protected readonly ITransmissionProxy _proxy;
 
         public TransmissionBase(ITransmissionProxy proxy,
@@ -37,50 +40,50 @@ namespace NzbDrone.Core.Download.Clients.Transmission
         public override IEnumerable<DownloadClientItem> GetItems()
         {
             var configFunc = new Lazy<TransmissionConfig>(() => _proxy.GetConfig(Settings));
-            var torrents = _proxy.GetTorrents(Settings);
+            var torrents = _proxy.GetTorrents(null, Settings);
+            var downloadDirectory = GetDownloadDirectory();
 
             var items = new List<DownloadClientItem>();
 
             foreach (var torrent in torrents)
             {
-                // If totalsize == 0 the torrent is a magnet downloading metadata
-                if (torrent.TotalSize == 0)
+                var outputPath = new OsPath(torrent.DownloadDir);
+
+                if (Settings.TvCategory.IsNotNullOrWhiteSpace() && SupportsLabels)
+                {
+                    // For people who are moving from Transmission 3 -> 4, torrents predating
+                    // labels are still matched by their category subfolder.
+                    if (torrent.Labels is { Count: > 0 })
+                    {
+                        if (!torrent.Labels.Contains(Settings.TvCategory, StringComparer.InvariantCultureIgnoreCase))
+                        {
+                            continue;
+                        }
+                    }
+                    else if (!outputPath.FullPath.Split('\\', '/').Contains(Settings.TvCategory))
+                    {
+                        continue;
+                    }
+                }
+
+                if (downloadDirectory.IsNotNullOrWhiteSpace() && !new OsPath(downloadDirectory).Contains(outputPath))
                 {
                     continue;
                 }
 
-                var outputPath = new OsPath(torrent.DownloadDir);
-
-                if (Settings.TvDirectory.IsNotNullOrWhiteSpace())
-                {
-                    if (!new OsPath(Settings.TvDirectory).Contains(outputPath))
-                    {
-                        continue;
-                    }
-                }
-                else if (Settings.TvCategory.IsNotNullOrWhiteSpace())
-                {
-                    var directories = outputPath.FullPath.Split('\\', '/');
-                    if (!directories.Contains(Settings.TvCategory))
-                    {
-                        continue;
-                    }
-                }
-
                 outputPath = _remotePathMappingService.RemapRemoteToLocal(Settings.Host, outputPath);
 
-                var item = new DownloadClientItem();
-                item.DownloadId = torrent.HashString.ToUpper();
-                item.Category = Settings.TvCategory;
-                item.Title = torrent.Name;
-
-                item.DownloadClientInfo = DownloadClientItemClientInfo.FromDownloadClient(this, false);
-
-                item.OutputPath = GetOutputPath(outputPath, torrent);
-                item.TotalSize = torrent.TotalSize;
-                item.RemainingSize = torrent.LeftUntilDone;
-                item.SeedRatio = torrent.DownloadedEver <= 0 ? 0 :
-                    (double)torrent.UploadedEver / torrent.DownloadedEver;
+                var item = new DownloadClientItem
+                {
+                    DownloadId = torrent.HashString.ToUpper(),
+                    Category = Settings.TvCategory,
+                    Title = torrent.Name,
+                    DownloadClientInfo = DownloadClientItemClientInfo.FromDownloadClient(this, Settings.TvImportedCategory.IsNotNullOrWhiteSpace() && SupportsLabels),
+                    OutputPath = GetOutputPath(outputPath, torrent),
+                    TotalSize = torrent.TotalSize,
+                    RemainingSize = torrent.LeftUntilDone,
+                    SeedRatio = torrent.DownloadedEver <= 0 ? 0 : (double)torrent.UploadedEver / torrent.DownloadedEver
+                };
 
                 if (torrent.Eta >= 0)
                 {
@@ -88,7 +91,7 @@ namespace NzbDrone.Core.Download.Clients.Transmission
                     {
                         item.RemainingTime = TimeSpan.FromSeconds(torrent.Eta);
                     }
-                    catch (OverflowException)
+                    catch (Exception ex) when (ex is OverflowException or ArgumentOutOfRangeException)
                     {
                         item.RemainingTime = TimeSpan.FromMilliseconds(torrent.Eta);
                     }
@@ -97,7 +100,15 @@ namespace NzbDrone.Core.Download.Clients.Transmission
                 if (!torrent.ErrorString.IsNullOrWhiteSpace())
                 {
                     item.Status = DownloadItemStatus.Warning;
-                    item.Message = torrent.ErrorString;
+                    item.Message = _localizationService.GetLocalizedString("DownloadClientItemErrorMessage", new Dictionary<string, object>
+                    {
+                        { "clientName", Name },
+                        { "message", torrent.ErrorString }
+                    });
+                }
+                else if (torrent.TotalSize == 0)
+                {
+                    item.Status = DownloadItemStatus.Queued;
                 }
                 else if (torrent.LeftUntilDone == 0 && (torrent.Status == TransmissionTorrentStatus.Stopped ||
                                                         torrent.Status == TransmissionTorrentStatus.Seeding ||
@@ -119,7 +130,7 @@ namespace NzbDrone.Core.Download.Clients.Transmission
                     item.Status = DownloadItemStatus.Downloading;
                 }
 
-                item.CanBeRemoved = HasReachedSeedLimit(torrent, item.SeedRatio, configFunc);
+                item.CanBeRemoved = item.DownloadClientInfo.RemoveCompletedDownloads && HasReachedSeedLimit(torrent, item.SeedRatio, configFunc);
                 item.CanMoveFiles = item.CanBeRemoved && torrent.Status == TransmissionTorrentStatus.Stopped;
 
                 items.Add(item);
@@ -175,26 +186,11 @@ namespace NzbDrone.Core.Download.Clients.Transmission
 
         public override DownloadClientInfo GetStatus()
         {
-            string destDir;
-
-            if (Settings.TvDirectory.IsNotNullOrWhiteSpace())
-            {
-                destDir = Settings.TvDirectory;
-            }
-            else
-            {
-                var config = _proxy.GetConfig(Settings);
-                destDir = config.DownloadDir;
-
-                if (Settings.TvCategory.IsNotNullOrWhiteSpace())
-                {
-                    destDir = $"{destDir}/{Settings.TvCategory}";
-                }
-            }
+            var destDir = GetDownloadDirectory() ?? _proxy.GetConfig(Settings).DownloadDir;
 
             return new DownloadClientInfo
             {
-                IsLocalhost = Settings.Host == "127.0.0.1" || Settings.Host == "localhost",
+                IsLocalhost = Settings.Host.IsLocalhostAddress(),
                 OutputRootFolders = new List<OsPath> { _remotePathMappingService.RemapRemoteToLocal(Settings.Host, new OsPath(destDir)) }
             };
         }
@@ -239,6 +235,11 @@ namespace NzbDrone.Core.Download.Clients.Transmission
                 return;
             }
 
+            if (!SupportsLabels && Settings.TvCategory.IsNotNullOrWhiteSpace() && Settings.TvDirectory.IsNotNullOrWhiteSpace())
+            {
+                failures.Add(new NzbDroneValidationFailure("TvCategory", "Cannot use Category and Directory"));
+            }
+
             failures.AddIfNotNull(TestGetTorrents());
         }
 
@@ -254,15 +255,12 @@ namespace NzbDrone.Core.Download.Clients.Transmission
                 return Settings.TvDirectory;
             }
 
-            if (!Settings.TvCategory.IsNotNullOrWhiteSpace())
+            if (SupportsLabels || Settings.TvCategory.IsNullOrWhiteSpace())
             {
                 return null;
             }
 
-            var config = _proxy.GetConfig(Settings);
-            var destDir = config.DownloadDir;
-
-            return $"{destDir.TrimEnd('/')}/{Settings.TvCategory}";
+            return $"{_proxy.GetConfig(Settings).DownloadDir.TrimEnd('/')}/{Settings.TvCategory}";
         }
 
         protected ValidationFailure TestConnection()
@@ -302,7 +300,7 @@ namespace NzbDrone.Core.Download.Clients.Transmission
         {
             try
             {
-                _proxy.GetTorrents(Settings);
+                _proxy.GetTorrents(null, Settings);
             }
             catch (Exception ex)
             {
@@ -311,6 +309,16 @@ namespace NzbDrone.Core.Download.Clients.Transmission
             }
 
             return null;
+        }
+
+        protected bool HasClientVersion(int major, int minor)
+        {
+            var rawVersion = _proxy.GetClientVersion(Settings);
+
+            var versionResult = Regex.Match(rawVersion, @"(?<!\(|(\d|\.)+)(\d|\.)+(?!\)|(\d|\.)+)").Value;
+            var clientVersion = Version.Parse(versionResult);
+
+            return clientVersion >= new Version(major, minor);
         }
     }
 }

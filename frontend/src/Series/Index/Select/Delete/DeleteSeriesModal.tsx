@@ -1,20 +1,22 @@
 import React from 'react';
 import Modal from 'Components/Modal/Modal';
-import DeleteSeriesModalContent from './DeleteSeriesModalContent';
+import DeleteSeriesModalContent, {
+  DeleteSeriesModalContentProps,
+} from './DeleteSeriesModalContent';
 
-interface DeleteSeriesModalProps {
+interface DeleteSeriesModalProps extends DeleteSeriesModalContentProps {
   isOpen: boolean;
-  seriesIds: number[];
-  onModalClose(): void;
 }
 
-function DeleteSeriesModal(props: DeleteSeriesModalProps) {
-  const { isOpen, seriesIds, onModalClose } = props;
-
+function DeleteSeriesModal({
+  isOpen,
+  onDeletePress,
+  onModalClose,
+}: DeleteSeriesModalProps) {
   return (
     <Modal isOpen={isOpen} onModalClose={onModalClose}>
       <DeleteSeriesModalContent
-        seriesIds={seriesIds}
+        onDeletePress={onDeletePress}
         onModalClose={onModalClose}
       />
     </Modal>

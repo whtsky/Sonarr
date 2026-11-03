@@ -51,6 +51,10 @@ namespace NzbDrone.Core.Test.ParserTests
         [TestCase("[Skymoon-Raws] Anime-Series Title S02 - 01 [ViuTV][CHT][WEB-DL][1080p][AVC AAC][MP4+ASS]", "Anime-Series Title S2", "Skymoon-Raws", 1)]
         [TestCase("[orion origin] Anime-Series Title S02[07][1080p][H264 AAC][CHS][ENG＆JPN stidio]", "Anime-Series Title S2", "orion origin", 7)]
         [TestCase("[UHA-WINGS][Anime-Series Title S02][01][x264 1080p][CHT].mp4", "Anime-Series Title S2", "UHA-WINGS", 1)]
+        [TestCase("[Suzuya Raws] 腼腆英雄 东京夺还篇 / Series 2nd Season - 01 [CR WebRip 1080p HEVC-10bit AAC][Multi-Subs]", "Series 2nd Season", "Suzuya Raws", 1)]
+        [TestCase("[ANi] SERIES / SERIES 靦腆英雄 - 11 [1080P][Baha][WEB-DL][AAC AVC][CHT][MP4]", "SERIES", "ANi", 11)]
+        [TestCase("[Q] 全职高手 第3季 / Series S3 - 09 (1080p HBR HEVC Multi-Sub)", "Series S3", "Q", 9)]
+        [TestCase("[Q] 全职高手 第3季 | Series S3 - 09 (1080p HBR HEVC Multi-Sub)", "Series S3", "Q", 9)]
         public void should_parse_chinese_anime_season_episode_releases(string postTitle, string title, string subgroup, int absoluteEpisodeNumber)
         {
             postTitle = XmlCleaner.ReplaceUnicode(postTitle);
@@ -141,6 +145,34 @@ namespace NzbDrone.Core.Test.ParserTests
             result.ReleaseGroup.Should().Be(subgroup);
             result.AbsoluteEpisodeNumbers.Single().Should().Be(absoluteEpisodeNumber);
             result.SeriesTitle.Should().Be(title);
+            result.FullSeason.Should().BeFalse();
+        }
+
+        [TestCase("【高清剧集网发布 www.DDHDTV.com】当我飞奔向你[全24集][国语音轨+简繁英字幕].Series.Towards.You.S01.2023.1080p.NF.WEB-DL.H264.DDP2.0-SeeWEB", "Series Towards You", "SeeWEB", 1)]
+        public void should_parse_full_season_releases(string postTitle, string title, string releaseGroup, int season)
+        {
+            postTitle = XmlCleaner.ReplaceUnicode(postTitle);
+
+            var result = Parser.Parser.ParseTitle(postTitle);
+            result.Should().NotBeNull();
+            result.ReleaseGroup.Should().Be(releaseGroup);
+            result.EpisodeNumbers.Should().BeEmpty();
+            result.AbsoluteEpisodeNumbers.Should().BeEmpty();
+            result.SeriesTitle.Should().Be(title);
+            result.FullSeason.Should().BeTrue();
+            result.SeasonNumbers.Should().Equal(season);
+        }
+
+        [TestCase("【高清剧集网发布 www.DDHDTV.com】当我飞奔向你[第01-15集][国语配音+中文字幕].Series.Towards.You.S01.2023.2160p.YK.WEB-DL.H265.AAC-BlackTV", "Series Towards You", "BlackTV", 1, new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 })]
+        public void should_parse_multi_episode_release(string postTitle, string title, string releaseGroup, int season, int[] episodes)
+        {
+            postTitle = XmlCleaner.ReplaceUnicode(postTitle);
+
+            var result = Parser.Parser.ParseTitle(postTitle);
+            result.SeasonNumbers.Should().Equal(season);
+            result.EpisodeNumbers.Should().BeEquivalentTo(episodes);
+            result.SeriesTitle.Should().Be(title);
+            result.AbsoluteEpisodeNumbers.Should().BeEmpty();
             result.FullSeason.Should().BeFalse();
         }
     }

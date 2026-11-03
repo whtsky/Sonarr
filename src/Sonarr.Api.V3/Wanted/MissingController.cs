@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using Microsoft.AspNetCore.Mvc;
 using NzbDrone.Core.CustomFormats;
 using NzbDrone.Core.Datastore;
@@ -27,13 +29,15 @@ namespace Sonarr.Api.V3.Wanted
         public PagingResource<EpisodeResource> GetMissingEpisodes([FromQuery] PagingRequestResource paging, bool includeSeries = false, bool includeImages = false, bool monitored = true)
         {
             var pagingResource = new PagingResource<EpisodeResource>(paging);
-            var pagingSpec = new PagingSpec<Episode>
-            {
-                Page = pagingResource.Page,
-                PageSize = pagingResource.PageSize,
-                SortKey = pagingResource.SortKey,
-                SortDirection = pagingResource.SortDirection
-            };
+            var pagingSpec = pagingResource.MapToPagingSpec<EpisodeResource, Episode>(
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    "episodes.airDateUtc",
+                    "episodes.lastSearchTime",
+                    "series.sortTitle"
+                },
+                "episodes.airDateUtc",
+                SortDirection.Ascending);
 
             if (monitored)
             {
@@ -44,7 +48,7 @@ namespace Sonarr.Api.V3.Wanted
                 pagingSpec.FilterExpressions.Add(v => v.Monitored == false || v.Series.Monitored == false);
             }
 
-            var resource = pagingSpec.ApplyToPage(_episodeService.EpisodesWithoutFiles, v => MapToResource(v, includeSeries, false, includeImages));
+            var resource = pagingSpec.ApplyToPage(spec => _episodeService.EpisodesWithoutFiles(spec, true), v => MapToResource(v, includeSeries, false, includeImages));
 
             return resource;
         }

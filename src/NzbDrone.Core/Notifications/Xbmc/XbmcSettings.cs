@@ -3,7 +3,6 @@ using FluentValidation;
 using Newtonsoft.Json;
 using NzbDrone.Common.Extensions;
 using NzbDrone.Core.Annotations;
-using NzbDrone.Core.ThingiProvider;
 using NzbDrone.Core.Validation;
 
 namespace NzbDrone.Core.Notifications.Xbmc
@@ -18,9 +17,9 @@ namespace NzbDrone.Core.Notifications.Xbmc
         }
     }
 
-    public class XbmcSettings : IProviderConfig
+    public class XbmcSettings : NotificationSettingsBase<XbmcSettings>
     {
-        private static readonly XbmcSettingsValidator Validator = new ();
+        private static readonly XbmcSettingsValidator Validator = new();
 
         public XbmcSettings()
         {
@@ -39,7 +38,7 @@ namespace NzbDrone.Core.Notifications.Xbmc
         [FieldToken(TokenField.HelpText, "UseSsl", "serviceName", "Kodi")]
         public bool UseSsl { get; set; }
 
-        [FieldDefinition(3, Label = "UrlBase", Type = FieldType.Textbox, Advanced = true, HelpText = "ConnectionSettingsUrlBaseHelpText")]
+        [FieldDefinition(3, Label = "UrlBase", Type = FieldType.Textbox, HelpText = "ConnectionSettingsUrlBaseHelpText")]
         [FieldToken(TokenField.HelpText, "UrlBase", "connectionName", "Kodi")]
         [FieldToken(TokenField.HelpText, "UrlBase", "url", "http://[host]:[port]/[urlBase]/kodi")]
         public string UrlBase { get; set; }
@@ -69,7 +68,7 @@ namespace NzbDrone.Core.Notifications.Xbmc
         [JsonIgnore]
         public string Address => $"{Host.ToUrlHost()}:{Port}{UrlBase}";
 
-        public NzbDroneValidationResult Validate()
+        public override NzbDroneValidationResult Validate()
         {
             return new NzbDroneValidationResult(Validator.Validate(this));
         }

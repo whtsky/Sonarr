@@ -1,11 +1,10 @@
 import { cloneDeep, without } from 'lodash';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
-import { createSelector } from 'reselect';
-import AppState from 'App/State/AppState';
-import InteractiveImportAppState from 'App/State/InteractiveImportAppState';
-import * as commandNames from 'Commands/commandNames';
-import SelectInput from 'Components/Form/SelectInput';
+import { create } from 'zustand';
+import { SelectProvider, useSelect } from 'App/Select/SelectContext';
+import CommandNames from 'Commands/CommandNames';
+import { useExecuteCommand } from 'Commands/useCommands';
+import SelectInput, { SelectInputOption } from 'Components/Form/SelectInput';
 import Icon from 'Components/Icon';
 import Button from 'Components/Link/Button';
 import SpinnerButton from 'Components/Link/SpinnerButton';
@@ -23,8 +22,11 @@ import Column from 'Components/Table/Column';
 import Table from 'Components/Table/Table';
 import TableBody from 'Components/Table/TableBody';
 import { EpisodeFile } from 'EpisodeFile/EpisodeFile';
+import {
+  useDeleteEpisodeFiles,
+  useUpdateEpisodeFiles,
+} from 'EpisodeFile/useEpisodeFiles';
 import usePrevious from 'Helpers/Hooks/usePrevious';
-import useSelectState from 'Helpers/Hooks/useSelectState';
 import { align, icons, kinds, scrollDirections } from 'Helpers/Props';
 import SelectEpisodeModal from 'InteractiveImport/Episode/SelectEpisodeModal';
 import { SelectedEpisode } from 'InteractiveImport/Episode/SelectEpisodeModalContent';
@@ -33,37 +35,33 @@ import SelectIndexerFlagsModal from 'InteractiveImport/IndexerFlags/SelectIndexe
 import InteractiveImport, {
   InteractiveImportCommandOptions,
 } from 'InteractiveImport/InteractiveImport';
+import {
+  InteractiveImportOptionsStore,
+  interactiveImportOptionsStore,
+} from 'InteractiveImport/interactiveImportOptionsStore';
 import SelectLanguageModal from 'InteractiveImport/Language/SelectLanguageModal';
 import SelectQualityModal from 'InteractiveImport/Quality/SelectQualityModal';
 import SelectReleaseGroupModal from 'InteractiveImport/ReleaseGroup/SelectReleaseGroupModal';
+import ReleaseType from 'InteractiveImport/ReleaseType';
+import SelectReleaseTypeModal from 'InteractiveImport/ReleaseType/SelectReleaseTypeModal';
 import SelectSeasonModal from 'InteractiveImport/Season/SelectSeasonModal';
 import SelectSeriesModal from 'InteractiveImport/Series/SelectSeriesModal';
+import useInteractiveImport, {
+  useReprocessInteractiveImportItems,
+  useUpdateInteractiveImportItem,
+  useUpdateInteractiveImportItems,
+} from 'InteractiveImport/useInteractiveImport';
 import Language from 'Language/Language';
 import { QualityModel } from 'Quality/Quality';
 import Series from 'Series/Series';
-import { executeCommand } from 'Store/Actions/commandActions';
-import {
-  deleteEpisodeFiles,
-  updateEpisodeFiles,
-} from 'Store/Actions/episodeFileActions';
-import {
-  clearInteractiveImport,
-  fetchInteractiveImportItems,
-  reprocessInteractiveImportItems,
-  setInteractiveImportMode,
-  setInteractiveImportSort,
-  updateInteractiveImportItem,
-  updateInteractiveImportItems,
-} from 'Store/Actions/interactiveImportActions';
-import createClientSideCollectionSelector from 'Store/Selectors/createClientSideCollectionSelector';
 import { SortCallback } from 'typings/callbacks';
-import { SelectStateInputProps } from 'typings/props';
+import { CheckInputChanged } from 'typings/inputs';
+import formatBytes from 'Utilities/Number/formatBytes';
 import getErrorMessage from 'Utilities/Object/getErrorMessage';
 import hasDifferentItems from 'Utilities/Object/hasDifferentItems';
 import translate from 'Utilities/String/translate';
-import getSelectedIds from 'Utilities/Table/getSelectedIds';
 import InteractiveImportRow from './InteractiveImportRow';
-import styles from './InteractiveImportModalContent.css';
+import styles from './InteractiveImportModalContent.module.css';
 
 type SelectType =
   | 'select'
@@ -73,9 +71,8 @@ type SelectType =
   | 'releaseGroup'
   | 'quality'
   | 'language'
-  | 'indexerFlags';
-
-type FilterExistingFiles = 'all' | 'new';
+  | 'indexerFlags'
+  | 'releaseType';
 
 // TODO: This feels janky to do, but not sure of a better way currently
 type OnSelectedChangeCallback = React.ComponentProps<
@@ -91,7 +88,7 @@ const COLUMNS = [
   },
   {
     name: 'series',
-    label: () => translate('Series'),
+    label: () => translate('SeriesSingular'),
     isSortable: true,
     isVisible: true,
   },
@@ -129,6 +126,12 @@ const COLUMNS = [
     isVisible: true,
   },
   {
+    name: 'releaseType',
+    label: () => translate('ReleaseType'),
+    isSortable: true,
+    isVisible: true,
+  },
+  {
     name: 'customFormats',
     label: React.createElement(Icon, {
       name: icons.INTERACTIVE,
@@ -158,7 +161,7 @@ const COLUMNS = [
   },
 ];
 
-const importModeOptions = [
+const importModeOptions: SelectInputOption[] = [
   {
     key: 'chooseImportMode',
     value: () => translate('ChooseImportMode'),
@@ -195,26 +198,10 @@ function isSameEpisodeFile(
   return !hasDifferentItems(originalFile.episodes, episodes);
 }
 
-const episodeFilesInfoSelector = createSelector(
-  (state: AppState) => state.episodeFiles.isDeleting,
-  (state: AppState) => state.episodeFiles.deleteError,
-  (isDeleting, deleteError) => {
-    return {
-      isDeleting,
-      deleteError,
-    };
-  }
-);
+const filterExistingFilesStore = create<boolean>(() => false);
 
-const importModeSelector = createSelector(
-  (state: AppState) => state.interactiveImport.importMode,
-  (importMode) => {
-    return importMode;
-  }
-);
-
-interface InteractiveImportModalContentProps {
-  downloadId?: string;
+export interface InteractiveImportModalContentProps {
+  downloadIds?: string[];
   seriesId?: number;
   seasonNumber?: number;
   showSeries?: boolean;
@@ -226,17 +213,16 @@ interface InteractiveImportModalContentProps {
   folder?: string;
   sortKey?: string;
   sortDirection?: string;
-  initialSortKey?: string;
-  initialSortDirection?: string;
+  optionsStore?: InteractiveImportOptionsStore;
   modalTitle: string;
   onModalClose(): void;
 }
 
-function InteractiveImportModalContent(
+function InteractiveImportModalContentInner(
   props: InteractiveImportModalContentProps
 ) {
   const {
-    downloadId,
+    downloadIds,
     seriesId,
     seasonNumber,
     allowSeriesChange = true,
@@ -246,26 +232,49 @@ function InteractiveImportModalContent(
     showImportMode = true,
     title,
     folder,
-    initialSortKey,
-    initialSortDirection,
+    optionsStore = interactiveImportOptionsStore,
     modalTitle,
     onModalClose,
   } = props;
 
-  const {
-    isFetching,
-    isPopulated,
-    error,
-    items,
-    originalItems,
-    sortKey,
-    sortDirection,
-  }: InteractiveImportAppState = useSelector(
-    createClientSideCollectionSelector('interactiveImport')
+  const filterExistingFiles = filterExistingFilesStore((state) => state);
+  const [reprocessingItems, setReprocessingItems] = useState<Set<number>>(
+    new Set()
   );
 
-  const { isDeleting, deleteError } = useSelector(episodeFilesInfoSelector);
-  const importMode = useSelector(importModeSelector);
+  const {
+    isFetching,
+    isFetched: isPopulated,
+    error,
+    data,
+    originalItems,
+  } = useInteractiveImport(
+    {
+      downloadIds,
+      seriesId,
+      seasonNumber,
+      folder,
+      filterExistingFiles,
+    },
+    optionsStore
+  );
+
+  const { sortKey, sortDirection, importMode } = optionsStore.useOptions();
+
+  const { updateInteractiveImportItem } = useUpdateInteractiveImportItem();
+  const { updateInteractiveImportItems } = useUpdateInteractiveImportItems();
+
+  const { reprocessInteractiveImportItems, isReprocessing } =
+    useReprocessInteractiveImportItems();
+
+  const wasReprocessing = usePrevious(isReprocessing);
+
+  const items = data;
+
+  const { isDeleting, deleteEpisodeFiles, deleteError } =
+    useDeleteEpisodeFiles();
+
+  const { updateEpisodeFiles } = useUpdateEpisodeFiles();
 
   const [invalidRowsSelected, setInvalidRowsSelected] = useState<number[]>([]);
   const [
@@ -277,13 +286,19 @@ function InteractiveImportModalContent(
   );
   const [isConfirmDeleteModalOpen, setIsConfirmDeleteModalOpen] =
     useState(false);
-  const [filterExistingFiles, setFilterExistingFiles] = useState(false);
   const [interactiveImportErrorMessage, setInteractiveImportErrorMessage] =
     useState<string | null>(null);
-  const [selectState, setSelectState] = useSelectState();
-  const { allSelected, allUnselected, selectedState } = selectState;
   const previousIsDeleting = usePrevious(isDeleting);
-  const dispatch = useDispatch();
+  const executeCommand = useExecuteCommand();
+
+  const {
+    allSelected,
+    allUnselected,
+    selectAll,
+    unselectAll,
+    toggleSelected,
+    useSelectedIds,
+  } = useSelect<InteractiveImport>();
 
   const columns: Column[] = useMemo(() => {
     const result: Column[] = cloneDeep(COLUMNS);
@@ -309,9 +324,7 @@ function InteractiveImportModalContent(
     return result;
   }, [showSeries, items]);
 
-  const selectedIds: number[] = useMemo(() => {
-    return getSelectedIds(selectedState);
-  }, [selectedState]);
+  const selectedIds = useSelectedIds();
 
   const bulkSelectOptions = useMemo(() => {
     const { seasonSelectDisabled, episodeSelectDisabled } = items.reduce(
@@ -337,7 +350,7 @@ function InteractiveImportModalContent(
       }
     );
 
-    const options = [
+    const options: SelectInputOption[] = [
       {
         key: 'select',
         value: translate('SelectDropdown'),
@@ -369,6 +382,10 @@ function InteractiveImportModalContent(
         key: 'indexerFlags',
         value: translate('SelectIndexerFlags'),
       },
+      {
+        key: 'releaseType',
+        value: translate('SelectReleaseType'),
+      },
     ];
 
     if (allowSeriesChange) {
@@ -381,38 +398,23 @@ function InteractiveImportModalContent(
     return options;
   }, [allowSeriesChange, items, selectedIds]);
 
-  useEffect(
-    () => {
-      if (initialSortKey) {
-        const sortProps: { sortKey: string; sortDirection?: string } = {
-          sortKey: initialSortKey,
-        };
+  const { totalDeleteEpisodeFileCount, totalDeleteEpisodeFileSize } =
+    useMemo(() => {
+      return items.reduce(
+        (acc, item) => {
+          if (selectedIds.indexOf(item.id) > -1 && item.episodeFileId) {
+            acc.totalDeleteEpisodeFileCount++;
+            acc.totalDeleteEpisodeFileSize += item.size;
+          }
 
-        if (initialSortDirection) {
-          sortProps.sortDirection = initialSortDirection;
+          return acc;
+        },
+        {
+          totalDeleteEpisodeFileCount: 0,
+          totalDeleteEpisodeFileSize: 0,
         }
-
-        dispatch(setInteractiveImportSort(sortProps));
-      }
-
-      dispatch(
-        fetchInteractiveImportItems({
-          downloadId,
-          seriesId,
-          seasonNumber,
-          folder,
-          filterExistingFiles,
-        })
       );
-
-      // returned function will be called on component unmount
-      return () => {
-        dispatch(clearInteractiveImport());
-      };
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
-  );
+    }, [items, selectedIds]);
 
   useEffect(() => {
     if (!isDeleting && previousIsDeleting && !deleteError) {
@@ -420,18 +422,20 @@ function InteractiveImportModalContent(
     }
   }, [previousIsDeleting, isDeleting, deleteError, onModalClose]);
 
-  const onSelectAllChange = useCallback(
-    ({ value }: SelectStateInputProps) => {
-      setSelectState({ type: value ? 'selectAll' : 'unselectAll', items });
+  const handleSelectAllChange = useCallback(
+    ({ value }: CheckInputChanged) => {
+      if (value) {
+        selectAll();
+      } else {
+        unselectAll();
+      }
     },
-    [items, setSelectState]
+    [selectAll, unselectAll]
   );
 
-  const onSelectedChange = useCallback<OnSelectedChangeCallback>(
+  const handleSelectedChange = useCallback<OnSelectedChangeCallback>(
     ({ id, value, hasEpisodeFileId, shiftKey = false }) => {
-      setSelectState({
-        type: 'toggleSelected',
-        items,
+      toggleSelected({
         id,
         isSelected: value,
         shiftKey,
@@ -439,19 +443,18 @@ function InteractiveImportModalContent(
 
       setWithoutEpisodeFileIdRowsSelected(
         hasEpisodeFileId || !value
-          ? without(withoutEpisodeFileIdRowsSelected, id)
-          : [...withoutEpisodeFileIdRowsSelected, id]
+          ? without(withoutEpisodeFileIdRowsSelected, id as number)
+          : [...withoutEpisodeFileIdRowsSelected, id as number]
       );
     },
     [
-      items,
       withoutEpisodeFileIdRowsSelected,
-      setSelectState,
       setWithoutEpisodeFileIdRowsSelected,
+      toggleSelected,
     ]
   );
 
-  const onValidRowChange = useCallback(
+  const handleValidRowChange = useCallback(
     (id: number, isValid: boolean) => {
       if (isValid && invalidRowsSelected.includes(id)) {
         setInvalidRowsSelected(without(invalidRowsSelected, id));
@@ -462,11 +465,11 @@ function InteractiveImportModalContent(
     [invalidRowsSelected, setInvalidRowsSelected]
   );
 
-  const onDeleteSelectedPress = useCallback(() => {
+  const handleDeleteSelectedPress = useCallback(() => {
     setIsConfirmDeleteModalOpen(true);
   }, [setIsConfirmDeleteModalOpen]);
 
-  const onConfirmDelete = useCallback(() => {
+  const handleConfirmDelete = useCallback(() => {
     setIsConfirmDeleteModalOpen(false);
 
     const episodeFileIds = items.reduce((acc: number[], item) => {
@@ -477,15 +480,16 @@ function InteractiveImportModalContent(
       return acc;
     }, []);
 
-    dispatch(deleteEpisodeFiles({ episodeFileIds }));
-  }, [items, selectedIds, setIsConfirmDeleteModalOpen, dispatch]);
+    deleteEpisodeFiles({ episodeFileIds });
+  }, [items, selectedIds, setIsConfirmDeleteModalOpen, deleteEpisodeFiles]);
 
-  const onConfirmDeleteModalClose = useCallback(() => {
+  const handleConfirmDeleteModalClose = useCallback(() => {
     setIsConfirmDeleteModalOpen(false);
   }, [setIsConfirmDeleteModalOpen]);
 
-  const onImportSelectedPress = useCallback(() => {
-    const finalImportMode = downloadId || !showImportMode ? 'auto' : importMode;
+  const handleImportSelectedPress = useCallback(() => {
+    const finalImportMode =
+      downloadIds || !showImportMode ? 'auto' : importMode;
 
     const existingFiles: Partial<EpisodeFile>[] = [];
     const files: InteractiveImportCommandOptions[] = [];
@@ -498,11 +502,15 @@ function InteractiveImportModalContent(
       return;
     }
 
+    const seenEpisodeIds = new Set<number>();
+    let hasDuplicateEpisodes = false;
+
     items.forEach((item) => {
       const isSelected = selectedIds.indexOf(item.id) > -1;
 
       if (isSelected) {
         const {
+          downloadId,
           series,
           seasonNumber,
           episodes,
@@ -511,6 +519,7 @@ function InteractiveImportModalContent(
           languages,
           indexerFlags,
           episodeFileId,
+          releaseType,
         } = item;
 
         if (!series) {
@@ -548,6 +557,19 @@ function InteractiveImportModalContent(
           return;
         }
 
+        if (!hasDuplicateEpisodes) {
+          for (const episode of episodes) {
+            const hasAlreadySeen = seenEpisodeIds.has(episode.id);
+
+            seenEpisodeIds.add(episode.id);
+
+            if (hasAlreadySeen) {
+              hasDuplicateEpisodes = true;
+              return;
+            }
+          }
+        }
+
         setInteractiveImportErrorMessage(null);
 
         if (episodeFileId) {
@@ -560,6 +582,7 @@ function InteractiveImportModalContent(
               quality,
               languages,
               indexerFlags,
+              releaseType,
             });
 
             return;
@@ -575,32 +598,36 @@ function InteractiveImportModalContent(
           quality,
           languages,
           indexerFlags,
+          releaseType,
           downloadId,
           episodeFileId,
         });
       }
     });
 
+    if (hasDuplicateEpisodes) {
+      setInteractiveImportErrorMessage(
+        translate('InteractiveImportDuplicateEpisodes')
+      );
+
+      return;
+    }
+
     let shouldClose = false;
 
     if (existingFiles.length) {
-      dispatch(
-        updateEpisodeFiles({
-          files: existingFiles,
-        })
-      );
+      updateEpisodeFiles(existingFiles);
 
       shouldClose = true;
     }
 
     if (files.length) {
-      dispatch(
-        executeCommand({
-          name: commandNames.INTERACTIVE_IMPORT,
-          files,
-          importMode: finalImportMode,
-        })
-      );
+      executeCommand({
+        name: CommandNames.ManualImport,
+        files,
+        importMode: finalImportMode,
+        priority: 'high',
+      });
 
       shouldClose = true;
     }
@@ -609,53 +636,49 @@ function InteractiveImportModalContent(
       onModalClose();
     }
   }, [
-    downloadId,
+    downloadIds,
     showImportMode,
     importMode,
     items,
     originalItems,
     selectedIds,
     onModalClose,
-    dispatch,
+    executeCommand,
+    updateEpisodeFiles,
   ]);
 
-  const onSortPress = useCallback<SortCallback>(
+  const handleSetInteractiveImportMode = useCallback(
+    ({ importMode }: { importMode: ImportMode }) => {
+      optionsStore.setOption('importMode', importMode);
+    },
+    [optionsStore]
+  );
+
+  const handleSortPress = useCallback<SortCallback>(
     (sortKey, sortDirection) => {
-      dispatch(setInteractiveImportSort({ sortKey, sortDirection }));
+      optionsStore.setSort({ sortKey, sortDirection });
     },
-    [dispatch]
+    [optionsStore]
   );
 
-  const onFilterExistingFilesChange = useCallback<
-    (value: FilterExistingFiles) => void
-  >(
-    (value) => {
+  const handleFilterExistingFilesChange = useCallback(
+    (value: string | undefined) => {
       const filter = value !== 'all';
-
-      setFilterExistingFiles(filter);
-
-      dispatch(
-        fetchInteractiveImportItems({
-          downloadId,
-          seriesId,
-          folder,
-          filterExistingFiles: filter,
-        })
-      );
+      filterExistingFilesStore.setState(filter);
     },
-    [downloadId, seriesId, folder, setFilterExistingFiles, dispatch]
+    []
   );
 
-  const onImportModeChange = useCallback<
+  const handleImportModeChange = useCallback<
     ({ value }: { value: ImportMode }) => void
   >(
     ({ value }) => {
-      dispatch(setInteractiveImportMode({ importMode: value }));
+      handleSetInteractiveImportMode({ importMode: value });
     },
-    [dispatch]
+    [handleSetInteractiveImportMode]
   );
 
-  const onSelectModalSelect = useCallback<
+  const handleSelectModalSelect = useCallback<
     ({ value }: { value: SelectType }) => void
   >(
     ({ value }) => {
@@ -664,127 +687,154 @@ function InteractiveImportModalContent(
     [setSelectModalOpen]
   );
 
-  const onSelectModalClose = useCallback(() => {
+  const handleSelectModalClose = useCallback(() => {
     setSelectModalOpen(null);
   }, [setSelectModalOpen]);
 
-  const onSeriesSelect = useCallback(
-    (series: Series) => {
-      dispatch(
-        updateInteractiveImportItems({
-          ids: selectedIds,
-          series,
-          seasonNumber: undefined,
-          episodes: [],
-        })
-      );
+  const handleReprocessItems = useCallback(
+    (ids: number[]) => {
+      setReprocessingItems((prev) => {
+        const newSet = new Set(prev);
 
-      dispatch(reprocessInteractiveImportItems({ ids: selectedIds }));
+        ids.forEach((id) => newSet.add(id));
 
-      setSelectModalOpen(null);
-    },
-    [selectedIds, setSelectModalOpen, dispatch]
-  );
-
-  const onSeasonSelect = useCallback(
-    (seasonNumber: number) => {
-      dispatch(
-        updateInteractiveImportItems({
-          ids: selectedIds,
-          seasonNumber,
-          episodes: [],
-        })
-      );
-
-      dispatch(reprocessInteractiveImportItems({ ids: selectedIds }));
-
-      setSelectModalOpen(null);
-    },
-    [selectedIds, setSelectModalOpen, dispatch]
-  );
-
-  const onEpisodesSelect = useCallback(
-    (selectedEpisodes: SelectedEpisode[]) => {
-      selectedEpisodes.forEach((selectedEpisode) => {
-        const { id, episodes } = selectedEpisode;
-
-        dispatch(
-          updateInteractiveImportItem({
-            id,
-            episodes,
-          })
-        );
+        return newSet;
       });
 
-      dispatch(reprocessInteractiveImportItems({ ids: selectedIds }));
+      reprocessInteractiveImportItems(ids);
+    },
+    [reprocessInteractiveImportItems]
+  );
+
+  const handleSeriesSelect = useCallback(
+    (series: Series) => {
+      const updates = {
+        series,
+        seasonNumber: undefined,
+        episodes: [],
+      };
+
+      updateInteractiveImportItems(selectedIds, updates);
+
+      handleReprocessItems(selectedIds);
+      setSelectModalOpen(null);
+    },
+    [
+      selectedIds,
+      updateInteractiveImportItems,
+      setSelectModalOpen,
+      handleReprocessItems,
+    ]
+  );
+
+  const handleSeasonSelect = useCallback(
+    (seasonNumber: number) => {
+      const updates = {
+        seasonNumber,
+        episodes: [],
+      };
+
+      updateInteractiveImportItems(selectedIds, updates);
+      handleReprocessItems(selectedIds);
 
       setSelectModalOpen(null);
     },
-    [selectedIds, setSelectModalOpen, dispatch]
+    [
+      selectedIds,
+      setSelectModalOpen,
+      updateInteractiveImportItems,
+      handleReprocessItems,
+    ]
   );
 
-  const onReleaseGroupSelect = useCallback(
+  const handleEpisodesSelect = useCallback(
+    (selectedEpisodes: SelectedEpisode[]) => {
+      selectedEpisodes.forEach(({ id, episodes }) => {
+        updateInteractiveImportItem(id, { episodes });
+      });
+
+      const selectedIds = selectedEpisodes.map(({ id }) => id);
+      handleReprocessItems(selectedIds);
+      setSelectModalOpen(null);
+    },
+    [updateInteractiveImportItem, setSelectModalOpen, handleReprocessItems]
+  );
+
+  const handleReleaseGroupSelect = useCallback(
     (releaseGroup: string) => {
-      dispatch(
-        updateInteractiveImportItems({
-          ids: selectedIds,
-          releaseGroup,
-        })
-      );
+      updateInteractiveImportItems(selectedIds, { releaseGroup });
 
-      dispatch(reprocessInteractiveImportItems({ ids: selectedIds }));
-
+      handleReprocessItems(selectedIds);
       setSelectModalOpen(null);
     },
-    [selectedIds, dispatch]
+    [
+      selectedIds,
+      updateInteractiveImportItems,
+      setSelectModalOpen,
+      handleReprocessItems,
+    ]
   );
 
-  const onLanguagesSelect = useCallback(
+  const handleLanguagesSelect = useCallback(
     (newLanguages: Language[]) => {
-      dispatch(
-        updateInteractiveImportItems({
-          ids: selectedIds,
-          languages: newLanguages,
-        })
-      );
+      updateInteractiveImportItems(selectedIds, { languages: newLanguages });
 
-      dispatch(reprocessInteractiveImportItems({ ids: selectedIds }));
-
+      handleReprocessItems(selectedIds);
       setSelectModalOpen(null);
     },
-    [selectedIds, dispatch]
+    [
+      selectedIds,
+      updateInteractiveImportItems,
+      setSelectModalOpen,
+      handleReprocessItems,
+    ]
   );
 
-  const onQualitySelect = useCallback(
+  const handleQualitySelect = useCallback(
     (quality: QualityModel) => {
-      dispatch(
-        updateInteractiveImportItems({
-          ids: selectedIds,
-          quality,
-        })
-      );
+      updateInteractiveImportItems(selectedIds, { quality });
 
-      dispatch(reprocessInteractiveImportItems({ ids: selectedIds }));
-
+      handleReprocessItems(selectedIds);
       setSelectModalOpen(null);
     },
-    [selectedIds, dispatch]
+    [
+      selectedIds,
+      updateInteractiveImportItems,
+      setSelectModalOpen,
+      handleReprocessItems,
+    ]
   );
 
-  const onIndexerFlagsSelect = useCallback(
+  const handleIndexerFlagsSelect = useCallback(
     (indexerFlags: number) => {
-      dispatch(
-        updateInteractiveImportItems({
-          ids: selectedIds,
-          indexerFlags,
-        })
-      );
+      updateInteractiveImportItems(selectedIds, { indexerFlags });
 
-      dispatch(reprocessInteractiveImportItems({ ids: selectedIds }));
-
+      handleReprocessItems(selectedIds);
       setSelectModalOpen(null);
     },
-    [selectedIds, dispatch]
+    [
+      selectedIds,
+      updateInteractiveImportItems,
+      setSelectModalOpen,
+      handleReprocessItems,
+    ]
+  );
+
+  const handleReleaseTypeSelect = useCallback(
+    (releaseType: string) => {
+      updateInteractiveImportItems(selectedIds, {
+        releaseType: releaseType as ReleaseType,
+      });
+
+      handleReprocessItems(selectedIds);
+      setSelectModalOpen(null);
+    },
+    [
+      selectedIds,
+      updateInteractiveImportItems,
+      setSelectModalOpen,
+      handleReprocessItems,
+    ]
   );
 
   const orderedSelectedIds = items.reduce((acc: number[], file) => {
@@ -804,6 +854,12 @@ function InteractiveImportModalContent(
     translate('InteractiveImportLoadError')
   );
 
+  useEffect(() => {
+    if (!isReprocessing && wasReprocessing) {
+      setReprocessingItems(new Set());
+    }
+  }, [isReprocessing, wasReprocessing]);
+
   return (
     <ModalContent onModalClose={onModalClose}>
       <ModalHeader>
@@ -811,7 +867,7 @@ function InteractiveImportModalContent(
       </ModalHeader>
 
       <ModalBody scrollDirection={scrollDirections.BOTH}>
-        {showFilterExistingFiles && (
+        {showFilterExistingFiles ? (
           <div className={styles.filterContainer}>
             <Menu alignMenu={align.RIGHT}>
               <MenuButton>
@@ -826,24 +882,24 @@ function InteractiveImportModalContent(
 
               <MenuContent>
                 <SelectedMenuItem
-                  name={'all'}
+                  name="all"
                   isSelected={!filterExistingFiles}
-                  onPress={onFilterExistingFilesChange}
+                  onPress={handleFilterExistingFilesChange}
                 >
                   {translate('AllFiles')}
                 </SelectedMenuItem>
 
                 <SelectedMenuItem
-                  name={'new'}
+                  name="new"
                   isSelected={filterExistingFiles}
-                  onPress={onFilterExistingFilesChange}
+                  onPress={handleFilterExistingFilesChange}
                 >
                   {translate('UnmappedFilesOnly')}
                 </SelectedMenuItem>
               </MenuContent>
             </Menu>
           </div>
-        )}
+        ) : null}
 
         {isFetching ? <LoadingIndicator /> : null}
 
@@ -858,21 +914,22 @@ function InteractiveImportModalContent(
             allUnselected={allUnselected}
             sortKey={sortKey}
             sortDirection={sortDirection}
-            onSortPress={onSortPress}
-            onSelectAllChange={onSelectAllChange}
+            onSortPress={handleSortPress}
+            onSelectAllChange={handleSelectAllChange}
           >
             <TableBody>
               {items.map((item) => {
                 return (
                   <InteractiveImportRow
                     key={item.id}
-                    isSelected={selectedState[item.id]}
                     {...item}
                     allowSeriesChange={allowSeriesChange}
                     columns={columns}
                     modalTitle={modalTitle}
-                    onSelectedChange={onSelectedChange}
-                    onValidRowChange={onValidRowChange}
+                    isReprocessing={reprocessingItems.has(item.id)}
+                    onReprocessItems={handleReprocessItems}
+                    onSelectedChange={handleSelectedChange}
+                    onValidRowChange={handleValidRowChange}
                   />
                 );
               })}
@@ -895,47 +952,47 @@ function InteractiveImportModalContent(
               isDisabled={
                 !selectedIds.length || !!withoutEpisodeFileIdRowsSelected.length
               }
-              onPress={onDeleteSelectedPress}
+              onPress={handleDeleteSelectedPress}
             >
               {translate('Delete')}
             </SpinnerButton>
           ) : null}
 
-          {!downloadId && showImportMode ? (
+          {!downloadIds && showImportMode ? (
             <SelectInput
               className={styles.importMode}
               name="importMode"
               value={importMode}
               values={importModeOptions}
-              onChange={onImportModeChange}
+              onChange={handleImportModeChange}
             />
           ) : null}
 
           <SelectInput
             className={styles.bulkSelect}
             name="select"
-            value={'select'}
+            value="select"
             values={bulkSelectOptions}
             isDisabled={!selectedIds.length}
-            onChange={onSelectModalSelect}
+            onChange={handleSelectModalSelect}
           />
         </div>
 
         <div className={styles.rightButtons}>
-          <Button onPress={onModalClose}>Cancel</Button>
-
-          {interactiveImportErrorMessage && (
+          {interactiveImportErrorMessage ? (
             <span className={styles.errorMessage}>
               {interactiveImportErrorMessage}
             </span>
-          )}
+          ) : null}
+
+          <Button onPress={onModalClose}>Cancel</Button>
 
           <Button
             kind={kinds.SUCCESS}
             isDisabled={!selectedIds.length || !!invalidRowsSelected.length}
-            onPress={onImportSelectedPress}
+            onPress={handleImportSelectedPress}
           >
-            {translate('Import')}
+            {folder ? translate('Apply') : translate('Import')}
           </Button>
         </div>
       </ModalFooter>
@@ -943,43 +1000,47 @@ function InteractiveImportModalContent(
       <SelectSeriesModal
         isOpen={selectModalOpen === 'series'}
         modalTitle={modalTitle}
-        onSeriesSelect={onSeriesSelect}
-        onModalClose={onSelectModalClose}
+        onSeriesSelect={handleSeriesSelect}
+        onModalClose={handleSelectModalClose}
       />
 
       <SelectSeasonModal
         isOpen={selectModalOpen === 'season'}
         seriesId={selectedItem?.series?.id}
         modalTitle={modalTitle}
-        onSeasonSelect={onSeasonSelect}
-        onModalClose={onSelectModalClose}
+        onSeasonSelect={handleSeasonSelect}
+        onModalClose={handleSelectModalClose}
       />
 
       <SelectEpisodeModal
         isOpen={selectModalOpen === 'episode'}
         selectedIds={orderedSelectedIds}
         seriesId={selectedItem?.series?.id}
-        seasonNumber={selectedItem?.seasonNumber}
+        seasonNumbers={
+          selectedItem?.seasonNumber == null
+            ? undefined
+            : [selectedItem.seasonNumber]
+        }
         isAnime={selectedItem?.series?.seriesType === 'anime'}
         modalTitle={modalTitle}
-        onEpisodesSelect={onEpisodesSelect}
-        onModalClose={onSelectModalClose}
+        onEpisodesSelect={handleEpisodesSelect}
+        onModalClose={handleSelectModalClose}
       />
 
       <SelectReleaseGroupModal
         isOpen={selectModalOpen === 'releaseGroup'}
         releaseGroup=""
         modalTitle={modalTitle}
-        onReleaseGroupSelect={onReleaseGroupSelect}
-        onModalClose={onSelectModalClose}
+        onReleaseGroupSelect={handleReleaseGroupSelect}
+        onModalClose={handleSelectModalClose}
       />
 
       <SelectLanguageModal
         isOpen={selectModalOpen === 'language'}
         languageIds={[0]}
         modalTitle={modalTitle}
-        onLanguagesSelect={onLanguagesSelect}
-        onModalClose={onSelectModalClose}
+        onLanguagesSelect={handleLanguagesSelect}
+        onModalClose={handleSelectModalClose}
       />
 
       <SelectQualityModal
@@ -988,28 +1049,78 @@ function InteractiveImportModalContent(
         proper={false}
         real={false}
         modalTitle={modalTitle}
-        onQualitySelect={onQualitySelect}
-        onModalClose={onSelectModalClose}
+        onQualitySelect={handleQualitySelect}
+        onModalClose={handleSelectModalClose}
       />
 
       <SelectIndexerFlagsModal
         isOpen={selectModalOpen === 'indexerFlags'}
         indexerFlags={0}
         modalTitle={modalTitle}
-        onIndexerFlagsSelect={onIndexerFlagsSelect}
-        onModalClose={onSelectModalClose}
+        onIndexerFlagsSelect={handleIndexerFlagsSelect}
+        onModalClose={handleSelectModalClose}
+      />
+
+      <SelectReleaseTypeModal
+        isOpen={selectModalOpen === 'releaseType'}
+        releaseType="unknown"
+        modalTitle={modalTitle}
+        onReleaseTypeSelect={handleReleaseTypeSelect}
+        onModalClose={handleSelectModalClose}
       />
 
       <ConfirmModal
         isOpen={isConfirmDeleteModalOpen}
         kind={kinds.DANGER}
         title={translate('DeleteSelectedEpisodeFiles')}
-        message={translate('DeleteSelectedEpisodeFilesHelpText')}
+        message={
+          <>
+            <div>{translate('DeleteSelectedEpisodeFilesHelpText')}</div>
+
+            <div className={styles.deleteFilesMessage}>
+              {translate('DeleteSelectedEpisodeFilesCount', {
+                episodeFileCount: totalDeleteEpisodeFileCount,
+                size: formatBytes(totalDeleteEpisodeFileSize),
+              })}
+            </div>
+          </>
+        }
         confirmLabel={translate('Delete')}
-        onConfirm={onConfirmDelete}
-        onCancel={onConfirmDeleteModalClose}
+        onConfirm={handleConfirmDelete}
+        onCancel={handleConfirmDeleteModalClose}
       />
     </ModalContent>
+  );
+}
+
+function InteractiveImportModalContent(
+  props: InteractiveImportModalContentProps
+) {
+  const filterExistingFiles = filterExistingFilesStore((state) => state);
+
+  const {
+    downloadIds,
+    seriesId,
+    seasonNumber,
+    folder,
+    optionsStore = interactiveImportOptionsStore,
+  } = props;
+
+  const { data } = useInteractiveImport(
+    {
+      downloadIds,
+      seriesId,
+      seasonNumber,
+      folder,
+      filterExistingFiles,
+    },
+    optionsStore
+  );
+
+  return (
+    <SelectProvider<InteractiveImport> items={data}>
+      <InteractiveImportModalContentInner {...props} />
+    </SelectProvider>
   );
 }
 

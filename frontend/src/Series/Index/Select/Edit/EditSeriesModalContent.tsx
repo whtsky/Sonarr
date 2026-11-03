@@ -1,18 +1,24 @@
 import React, { useCallback, useState } from 'react';
-import FormGroup from 'Components/Form/FormGroup';
-import FormInputGroup from 'Components/Form/FormInputGroup';
+import { useSelect } from 'App/Select/SelectContext';
+import FormInput from 'Components/Form/FormInput';
+import FormInputHelpText from 'Components/Form/FormInputHelpText';
 import FormLabel from 'Components/Form/FormLabel';
+import FormRow from 'Components/Form/FormRow';
+import { EnhancedSelectInputValue } from 'Components/Form/Select/EnhancedSelectInput';
 import Button from 'Components/Link/Button';
 import ModalBody from 'Components/Modal/ModalBody';
 import ModalContent from 'Components/Modal/ModalContent';
 import ModalFooter from 'Components/Modal/ModalFooter';
 import ModalHeader from 'Components/Modal/ModalHeader';
 import { inputTypes } from 'Helpers/Props';
+import Language from 'Language/Language';
 import MoveSeriesModal from 'Series/MoveSeries/MoveSeriesModal';
+import { InputChanged } from 'typings/inputs';
 import translate from 'Utilities/String/translate';
-import styles from './EditSeriesModalContent.css';
+import styles from './EditSeriesModalContent.module.css';
 
 interface SavePayload {
+  language?: Language;
   monitored?: boolean;
   monitorNewItems?: string;
   qualityProfileId?: number;
@@ -22,15 +28,14 @@ interface SavePayload {
   moveFiles?: boolean;
 }
 
-interface EditSeriesModalContentProps {
-  seriesIds: number[];
+export interface EditSeriesModalContentProps {
   onSavePress(payload: object): void;
   onModalClose(): void;
 }
 
 const NO_CHANGE = 'noChange';
 
-const monitoredOptions = [
+const monitoredOptions: EnhancedSelectInputValue<string>[] = [
   {
     key: NO_CHANGE,
     get value() {
@@ -52,7 +57,7 @@ const monitoredOptions = [
   },
 ];
 
-const seasonFolderOptions = [
+const seasonFolderOptions: EnhancedSelectInputValue<string>[] = [
   {
     key: NO_CHANGE,
     get value() {
@@ -75,8 +80,9 @@ const seasonFolderOptions = [
 ];
 
 function EditSeriesModalContent(props: EditSeriesModalContentProps) {
-  const { seriesIds, onSavePress, onModalClose } = props;
+  const { onSavePress, onModalClose } = props;
 
+  const [language, setLanguage] = useState<Language | string>(NO_CHANGE);
   const [monitored, setMonitored] = useState(NO_CHANGE);
   const [monitorNewItems, setMonitorNewItems] = useState(NO_CHANGE);
   const [qualityProfileId, setQualityProfileId] = useState<string | number>(
@@ -86,11 +92,17 @@ function EditSeriesModalContent(props: EditSeriesModalContentProps) {
   const [seasonFolder, setSeasonFolder] = useState(NO_CHANGE);
   const [rootFolderPath, setRootFolderPath] = useState(NO_CHANGE);
   const [isConfirmMoveModalOpen, setIsConfirmMoveModalOpen] = useState(false);
+  const { selectedCount } = useSelect();
 
   const save = useCallback(
     (moveFiles: boolean) => {
       let hasChanges = false;
       const payload: SavePayload = {};
+
+      if (language !== NO_CHANGE) {
+        hasChanges = true;
+        payload.language = language as Language;
+      }
 
       if (monitored !== NO_CHANGE) {
         hasChanges = true;
@@ -130,6 +142,7 @@ function EditSeriesModalContent(props: EditSeriesModalContentProps) {
       onModalClose();
     },
     [
+      language,
       monitored,
       monitorNewItems,
       qualityProfileId,
@@ -142,25 +155,28 @@ function EditSeriesModalContent(props: EditSeriesModalContentProps) {
   );
 
   const onInputChange = useCallback(
-    ({ name, value }: { name: string; value: string }) => {
+    ({ name, value }: InputChanged) => {
       switch (name) {
+        case 'language':
+          setLanguage(value as Language);
+          break;
         case 'monitored':
-          setMonitored(value);
+          setMonitored(value as string);
           break;
         case 'monitorNewItems':
-          setMonitorNewItems(value);
+          setMonitorNewItems(value as string);
           break;
         case 'qualityProfileId':
-          setQualityProfileId(value);
+          setQualityProfileId(value as string);
           break;
         case 'seriesType':
-          setSeriesType(value);
+          setSeriesType(value as string);
           break;
         case 'seasonFolder':
-          setSeasonFolder(value);
+          setSeasonFolder(value as string);
           break;
         case 'rootFolderPath':
-          setRootFolderPath(value);
+          setRootFolderPath(value as string);
           break;
         default:
           console.warn('EditSeriesModalContent Unknown Input');
@@ -191,29 +207,40 @@ function EditSeriesModalContent(props: EditSeriesModalContentProps) {
     save(true);
   }, [setIsConfirmMoveModalOpen, save]);
 
-  const selectedCount = seriesIds.length;
-
   return (
     <ModalContent onModalClose={onModalClose}>
       <ModalHeader>{translate('EditSelectedSeries')}</ModalHeader>
-
       <ModalBody>
-        <FormGroup>
+        <FormRow>
+          <FormLabel>{translate('Language')}</FormLabel>
+
+          <FormInputHelpText text={translate('SeriesLanguageHelpText')} />
+          <FormInput
+            type={inputTypes.LANGUAGE_SELECT}
+            name="language"
+            value={language}
+            includeNoChange={true}
+            includeNoChangeDisabled={false}
+            onChange={onInputChange}
+          />
+        </FormRow>
+
+        <FormRow>
           <FormLabel>{translate('Monitored')}</FormLabel>
 
-          <FormInputGroup
+          <FormInput
             type={inputTypes.SELECT}
             name="monitored"
             value={monitored}
             values={monitoredOptions}
             onChange={onInputChange}
           />
-        </FormGroup>
+        </FormRow>
 
-        <FormGroup>
+        <FormRow>
           <FormLabel>{translate('MonitorNewItems')}</FormLabel>
 
-          <FormInputGroup
+          <FormInput
             type={inputTypes.MONITOR_NEW_ITEMS_SELECT}
             name="monitorNewItems"
             value={monitorNewItems}
@@ -221,12 +248,12 @@ function EditSeriesModalContent(props: EditSeriesModalContentProps) {
             includeNoChangeDisabled={false}
             onChange={onInputChange}
           />
-        </FormGroup>
+        </FormRow>
 
-        <FormGroup>
+        <FormRow>
           <FormLabel>{translate('QualityProfile')}</FormLabel>
 
-          <FormInputGroup
+          <FormInput
             type={inputTypes.QUALITY_PROFILE_SELECT}
             name="qualityProfileId"
             value={qualityProfileId}
@@ -234,56 +261,53 @@ function EditSeriesModalContent(props: EditSeriesModalContentProps) {
             includeNoChangeDisabled={false}
             onChange={onInputChange}
           />
-        </FormGroup>
+        </FormRow>
 
-        <FormGroup>
+        <FormRow>
           <FormLabel>{translate('SeriesType')}</FormLabel>
-
-          <FormInputGroup
+          <FormInputHelpText text={translate('SeriesTypesHelpText')} />
+          <FormInput
             type={inputTypes.SERIES_TYPE_SELECT}
             name="seriesType"
             value={seriesType}
             includeNoChange={true}
             includeNoChangeDisabled={false}
-            helpText={translate('SeriesTypesHelpText')}
             onChange={onInputChange}
           />
-        </FormGroup>
+        </FormRow>
 
-        <FormGroup>
+        <FormRow>
           <FormLabel>{translate('SeasonFolder')}</FormLabel>
 
-          <FormInputGroup
+          <FormInput
             type={inputTypes.SELECT}
             name="seasonFolder"
             value={seasonFolder}
             values={seasonFolderOptions}
             onChange={onInputChange}
           />
-        </FormGroup>
+        </FormRow>
 
-        <FormGroup>
+        <FormRow>
           <FormLabel>{translate('RootFolder')}</FormLabel>
-
-          <FormInputGroup
+          <FormInputHelpText text={translate('SeriesEditRootFolderHelpText')} />
+          <FormInput
             type={inputTypes.ROOT_FOLDER_SELECT}
             name="rootFolderPath"
             value={rootFolderPath}
             includeNoChange={true}
             includeNoChangeDisabled={false}
             selectedValueOptions={{ includeFreeSpace: false }}
-            helpText={translate('SeriesEditRootFolderHelpText')}
             onChange={onInputChange}
           />
-        </FormGroup>
+        </FormRow>
       </ModalBody>
-
       <ModalFooter className={styles.modalFooter}>
         <div className={styles.selected}>
           {translate('CountSeriesSelected', { count: selectedCount })}
         </div>
 
-        <div>
+        <div className={styles.buttons}>
           <Button onPress={onModalClose}>{translate('Cancel')}</Button>
 
           <Button onPress={onSavePressWrapper}>
@@ -291,7 +315,6 @@ function EditSeriesModalContent(props: EditSeriesModalContentProps) {
           </Button>
         </div>
       </ModalFooter>
-
       <MoveSeriesModal
         isOpen={isConfirmMoveModalOpen}
         destinationRootFolder={rootFolderPath}

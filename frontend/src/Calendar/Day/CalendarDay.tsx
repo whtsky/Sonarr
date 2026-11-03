@@ -1,27 +1,108 @@
 import classNames from 'classnames';
-import moment from 'moment';
+import moment from 'moment-timezone';
 import React from 'react';
+import { useCalendarOption } from 'Calendar/calendarOptionsStore';
 import * as calendarViews from 'Calendar/calendarViews';
-import CalendarEventConnector from 'Calendar/Events/CalendarEventConnector';
-import CalendarEventGroupConnector from 'Calendar/Events/CalendarEventGroupConnector';
-import Series from 'Series/Series';
-import CalendarEventGroup, { CalendarEvent } from 'typings/CalendarEventGroup';
-import styles from './CalendarDay.css';
+import CalendarEvent from 'Calendar/Events/CalendarEvent';
+import CalendarEventGroup from 'Calendar/Events/CalendarEventGroup';
+import useCalendar, { useCalendarTime } from 'Calendar/useCalendar';
+import { useUiSettingsValues } from 'Settings/UI/useUiSettings';
+import {
+  CalendarEvent as CalendarEventModel,
+  CalendarEventGroup as CalendarEventGroupModel,
+  CalendarItem,
+} from 'typings/Calendar';
+import translate from 'Utilities/String/translate';
+import styles from './CalendarDay.module.css';
+
+function sort(items: (CalendarEventModel | CalendarEventGroupModel)[]) {
+  return items.sort((a, b) => {
+    const aDate = a.isGroup
+      ? moment(a.events[0].airDateUtc).unix()
+      : moment(a.airDateUtc).unix();
+
+    const bDate = b.isGroup
+      ? moment(b.events[0].airDateUtc).unix()
+      : moment(b.airDateUtc).unix();
+
+    return aDate - bDate;
+  });
+}
+
+const useCalendarEvents = (date: string) => {
+  const { data } = useCalendar();
+  const collapseMultipleEpisodes = useCalendarOption(
+    'collapseMultipleEpisodes'
+  );
+
+  const momentDate = moment(date);
+
+  const filtered = data.filter((item) => {
+    return momentDate.isSame(moment(item.airDateUtc), 'day');
+  });
+
+  if (!collapseMultipleEpisodes) {
+    return sort(
+      filtered.map((item) => ({
+        isGroup: false,
+        ...item,
+      }))
+    );
+  }
+
+  const groupedObject = Object.groupBy(
+    filtered,
+    (item: CalendarItem) => `${item.seriesId}-${item.seasonNumber}`
+  );
+
+  const grouped = Object.entries(groupedObject).reduce<
+    (CalendarEventModel | CalendarEventGroupModel)[]
+  >((acc, [, events]) => {
+    if (!events) {
+      return acc;
+    }
+
+    if (events.length === 1) {
+      acc.push({
+        isGroup: false,
+        ...events[0],
+      });
+    } else {
+      acc.push({
+        isGroup: true,
+        seriesId: events[0].seriesId,
+        seasonNumber: events[0].seasonNumber,
+        episodeIds: events.map((event) => event.id),
+        events: events.sort(
+          (a, b) => moment(a.airDateUtc).unix() - moment(b.airDateUtc).unix()
+        ),
+      });
+    }
+
+    return acc;
+  }, []);
+
+  return sort(grouped);
+};
 
 interface CalendarDayProps {
   date: string;
-  time: string;
   isTodaysDate: boolean;
-  events: (CalendarEvent | CalendarEventGroup)[];
-  view: string;
-  onEventModalOpenToggle(...args: unknown[]): unknown;
+  onEventModalOpenToggle(isOpen: boolean): unknown;
 }
 
-function CalendarDay(props: CalendarDayProps) {
-  const { date, time, isTodaysDate, events, view, onEventModalOpenToggle } =
-    props;
+function CalendarDay({
+  date,
+  isTodaysDate,
+  onEventModalOpenToggle,
+}: CalendarDayProps) {
+  const view = useCalendarOption('view');
+  const time = useCalendarTime();
+  const events = useCalendarEvents(date);
+  const { longDateFormat } = useUiSettingsValues();
+  const momentDate = moment(date);
 
-  const ref = React.useRef<HTMLDivElement>(null);
+  const ref = React.useRef<HTMLTableCellElement>(null);
 
   React.useEffect(() => {
     if (isTodaysDate && view === calendarViews.MONTH && ref.current) {
@@ -30,11 +111,12 @@ function CalendarDay(props: CalendarDayProps) {
   }, [time, isTodaysDate, view]);
 
   return (
-    <div
+    <td
       ref={ref}
       className={classNames(
         styles.day,
-        view === calendarViews.DAY && styles.isSingleDay
+        view === calendarViews.DAY && styles.isSingleDay,
+        isTodaysDate && styles.isTodayCell
       )}
     >
       {view === calendarViews.MONTH && (
@@ -46,14 +128,25 @@ function CalendarDay(props: CalendarDayProps) {
               styles.isDifferentMonth
           )}
         >
-          {moment(date).date()}
+          <time
+            dateTime={momentDate.format('YYYY-MM-DD')}
+            aria-current={isTodaysDate ? 'date' : undefined}
+          >
+            <span className={styles.fullDate}>
+              {momentDate.format(longDateFormat)}
+            </span>
+            <span aria-hidden={true}>{momentDate.date()}</span>
+          </time>
         </div>
       )}
+      {!events.length && view === calendarViews.DAY ? (
+        <div className={styles.noEvents}>{translate('NoEpisodesAiring')}</div>
+      ) : null}
       <div>
         {events.map((event) => {
           if (event.isGroup) {
             return (
-              <CalendarEventGroupConnector
+              <CalendarEventGroup
                 key={event.seriesId}
                 {...event}
                 onEventModalOpenToggle={onEventModalOpenToggle}
@@ -62,18 +155,18 @@ function CalendarDay(props: CalendarDayProps) {
           }
 
           return (
-            <CalendarEventConnector
+            <CalendarEvent
               key={event.id}
               {...event}
               episodeId={event.id}
-              series={event.series as Series}
+              seriesId={event.seriesId}
               airDateUtc={event.airDateUtc as string}
               onEventModalOpenToggle={onEventModalOpenToggle}
             />
           );
         })}
       </div>
-    </div>
+    </td>
   );
 }
 

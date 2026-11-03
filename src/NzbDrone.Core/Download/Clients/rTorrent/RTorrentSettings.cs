@@ -1,6 +1,5 @@
 using FluentValidation;
 using NzbDrone.Core.Annotations;
-using NzbDrone.Core.ThingiProvider;
 using NzbDrone.Core.Validation;
 
 namespace NzbDrone.Core.Download.Clients.RTorrent
@@ -17,9 +16,9 @@ namespace NzbDrone.Core.Download.Clients.RTorrent
         }
     }
 
-    public class RTorrentSettings : IProviderConfig
+    public class RTorrentSettings : DownloadClientSettingsBase<RTorrentSettings>
     {
-        private static readonly RTorrentSettingsValidator Validator = new RTorrentSettingsValidator();
+        private static readonly RTorrentSettingsValidator Validator = new();
 
         public RTorrentSettings()
         {
@@ -55,10 +54,10 @@ namespace NzbDrone.Core.Download.Clients.RTorrent
         [FieldDefinition(6, Label = "Category", Type = FieldType.Textbox, HelpText = "DownloadClientSettingsCategoryHelpText")]
         public string TvCategory { get; set; }
 
-        [FieldDefinition(7, Label = "PostImportCategory", Type = FieldType.Textbox, Advanced = true, HelpText = "DownloadClientSettingsPostImportCategoryHelpText")]
+        [FieldDefinition(7, Label = "PostImportCategory", Type = FieldType.Textbox, HelpText = "DownloadClientSettingsPostImportCategoryHelpText")]
         public string TvImportedCategory { get; set; }
 
-        [FieldDefinition(8, Label = "Directory", Type = FieldType.Textbox, Advanced = true, HelpText = "DownloadClientRTorrentSettingsDirectoryHelpText")]
+        [FieldDefinition(8, Label = "Directory", Type = FieldType.Textbox, HelpText = "DownloadClientRTorrentSettingsDirectoryHelpText")]
         public string TvDirectory { get; set; }
 
         [FieldDefinition(9, Label = "DownloadClientSettingsRecentPriority", Type = FieldType.Select, SelectOptions = typeof(RTorrentPriority), HelpText = "DownloadClientSettingsRecentPriorityEpisodeHelpText")]
@@ -70,7 +69,7 @@ namespace NzbDrone.Core.Download.Clients.RTorrent
         [FieldDefinition(11, Label = "DownloadClientRTorrentSettingsAddStopped", Type = FieldType.Checkbox, HelpText = "DownloadClientRTorrentSettingsAddStoppedHelpText")]
         public bool AddStopped { get; set; }
 
-        public NzbDroneValidationResult Validate()
+        public override NzbDroneValidationResult Validate()
         {
             return new NzbDroneValidationResult(Validator.Validate(this));
         }

@@ -8,6 +8,7 @@ using NUnit.Framework;
 using NzbDrone.Common.Extensions;
 using NzbDrone.Core.AutoTagging;
 using NzbDrone.Core.Exceptions;
+using NzbDrone.Core.Languages;
 using NzbDrone.Core.MediaFiles;
 using NzbDrone.Core.MetadataSource;
 using NzbDrone.Core.Test.Framework;
@@ -31,6 +32,8 @@ namespace NzbDrone.Core.Test.TvTests
 
             _series = Builder<Series>.CreateNew()
                                      .With(s => s.Status = SeriesStatusType.Continuing)
+                                     .With(s => s.Language = Language.English)
+                                     .With(s => s.SeasonType = SeasonType.Official)
                                      .With(s => s.Seasons = new List<Season>
                                                             {
                                                                 season1
@@ -42,8 +45,8 @@ namespace NzbDrone.Core.Test.TvTests
                   .Returns(_series);
 
             Mocker.GetMock<IProvideSeriesInfo>()
-                  .Setup(s => s.GetSeriesInfo(It.IsAny<int>()))
-                  .Callback<int>(p => { throw new SeriesNotFoundException(p); });
+                  .Setup(s => s.GetSeriesInfo(It.IsAny<int>(), It.IsAny<Language>(), It.IsAny<string>()))
+                  .Callback<int, Language, string>((p, _, _) => { throw new SeriesNotFoundException(p); });
 
             Mocker.GetMock<IAutoTaggingService>()
                 .Setup(s => s.GetTagChanges(_series))
@@ -53,7 +56,7 @@ namespace NzbDrone.Core.Test.TvTests
         private void GivenNewSeriesInfo(Series series)
         {
             Mocker.GetMock<IProvideSeriesInfo>()
-                  .Setup(s => s.GetSeriesInfo(_series.TvdbId))
+                  .Setup(s => s.GetSeriesInfo(_series.TvdbId, Language.English, SeasonType.Official))
                   .Returns(new Tuple<Series, List<Episode>>(series, new List<Episode>()));
         }
 
@@ -135,6 +138,20 @@ namespace NzbDrone.Core.Test.TvTests
 
             Mocker.GetMock<ISeriesService>()
                 .Verify(v => v.UpdateSeries(It.Is<Series>(s => s.TvMazeId == newSeriesInfo.TvMazeId), It.IsAny<bool>(), It.IsAny<bool>()));
+        }
+
+        [Test]
+        public void should_update_tmdb_id_if_changed()
+        {
+            var newSeriesInfo = _series.JsonClone();
+            newSeriesInfo.TmdbId = _series.TmdbId + 1;
+
+            GivenNewSeriesInfo(newSeriesInfo);
+
+            Subject.Execute(new RefreshSeriesCommand(new List<int> { _series.Id }));
+
+            Mocker.GetMock<ISeriesService>()
+                .Verify(v => v.UpdateSeries(It.Is<Series>(s => s.TmdbId == newSeriesInfo.TmdbId), It.IsAny<bool>(), It.IsAny<bool>()));
         }
 
         [Test]
@@ -236,10 +253,10 @@ namespace NzbDrone.Core.Test.TvTests
         public void should_rescan_series_if_updating_fails()
         {
             Mocker.GetMock<IProvideSeriesInfo>()
-                  .Setup(s => s.GetSeriesInfo(_series.Id))
+                  .Setup(s => s.GetSeriesInfo(_series.Id, Language.English, SeasonType.Official))
                   .Throws(new IOException());
 
-            Assert.Throws<IOException>(() => Subject.Execute(new RefreshSeriesCommand(new List<int> { _series.Id })));
+            Subject.Execute(new RefreshSeriesCommand(new List<int> { _series.Id }));
 
             Mocker.GetMock<IDiskScanService>()
                   .Verify(v => v.Scan(_series), Times.Once());
@@ -251,7 +268,7 @@ namespace NzbDrone.Core.Test.TvTests
         public void should_not_rescan_series_if_updating_fails_with_series_not_found()
         {
             Mocker.GetMock<IProvideSeriesInfo>()
-                  .Setup(s => s.GetSeriesInfo(_series.Id))
+                  .Setup(s => s.GetSeriesInfo(_series.Id, Language.English, SeasonType.Official))
                   .Throws(new SeriesNotFoundException(_series.Id));
 
             Subject.Execute(new RefreshSeriesCommand(new List<int> { _series.Id }));
@@ -260,6 +277,39 @@ namespace NzbDrone.Core.Test.TvTests
                   .Verify(v => v.Scan(_series), Times.Never());
 
             ExceptionVerification.ExpectedErrors(1);
+        }
+
+        [Test]
+        public void should_update_tags_on_refreshed_series_when_refreshing_all_series()
+        {
+            var staleSeries = Builder<Series>.CreateNew()
+                                             .With(s => s.Id = _series.Id)
+                                             .Build();
+
+            GivenNewSeriesInfo(_series.JsonClone());
+
+            Mocker.GetMock<ISeriesService>()
+                  .Setup(s => s.GetAllSeries())
+                  .Returns(new List<Series> { staleSeries });
+
+            Mocker.GetMock<ICheckIfSeriesShouldBeRefreshed>()
+                  .Setup(s => s.ShouldRefresh(It.IsAny<Series>()))
+                  .Returns(true);
+
+            Mocker.GetMock<ISeriesService>()
+                  .Setup(s => s.UpdateAutoTaggingTags(It.IsAny<Series>()))
+                  .Returns(true);
+
+            Subject.Execute(new RefreshSeriesCommand());
+
+            Mocker.GetMock<ISeriesService>()
+                  .Verify(v => v.UpdateAutoTaggingTags(_series), Times.Once());
+
+            Mocker.GetMock<ISeriesService>()
+                  .Verify(v => v.UpdateAutoTaggingTags(staleSeries), Times.Never());
+
+            Mocker.GetMock<ISeriesService>()
+                  .Verify(v => v.UpdateSeries(staleSeries, It.IsAny<bool>(), It.IsAny<bool>()), Times.Never());
         }
     }
 }

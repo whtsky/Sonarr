@@ -1,0 +1,239 @@
+import classNames from 'classnames';
+import moment from 'moment-timezone';
+import React, { useCallback, useState } from 'react';
+import { useQueueItemForEpisode } from 'Activity/Queue/Details/QueueDetailsProvider';
+import { useCalendarOptions } from 'Calendar/calendarOptionsStore';
+import CalendarEventQueueDetails from 'Calendar/Events/CalendarEventQueueDetails';
+import getCalendarStatusLabel from 'Calendar/Events/getCalendarStatusLabel';
+import getStatusStyle from 'Calendar/getStatusStyle';
+import Icon from 'Components/Icon';
+import Link from 'Components/Link/Link';
+import EpisodeDetailsModal from 'Episode/EpisodeDetailsModal';
+import episodeEntities from 'Episode/episodeEntities';
+import getFinaleTypeName from 'Episode/getFinaleTypeName';
+import { useEpisodeFile } from 'EpisodeFile/EpisodeFileProvider';
+import { icons, kinds } from 'Helpers/Props';
+import SeriesPoster from 'Series/SeriesPoster';
+import { useSingleSeries } from 'Series/useSeries';
+import { useUiSettingsValues } from 'Settings/UI/useUiSettings';
+import formatDateTime from 'Utilities/Date/formatDateTime';
+import formatTime from 'Utilities/Date/formatTime';
+import padNumber from 'Utilities/Number/padNumber';
+import translate from 'Utilities/String/translate';
+import styles from './AgendaEvent.module.css';
+
+interface AgendaEventProps {
+  id: number;
+  seriesId: number;
+  episodeFileId: number;
+  title: string;
+  seasonNumber: number;
+  episodeNumber: number;
+  absoluteEpisodeNumber?: number;
+  airDateUtc: string;
+  monitored: boolean;
+  unverifiedSceneNumbering?: boolean;
+  finaleType?: string;
+  hasFile: boolean;
+  grabbed?: boolean;
+}
+
+function AgendaEvent(props: AgendaEventProps) {
+  const {
+    id,
+    seriesId,
+    episodeFileId,
+    title,
+    seasonNumber,
+    episodeNumber,
+    absoluteEpisodeNumber,
+    airDateUtc,
+    monitored,
+    unverifiedSceneNumbering,
+    finaleType,
+    hasFile,
+    grabbed,
+  } = props;
+
+  const series = useSingleSeries(seriesId)!;
+  const episodeFile = useEpisodeFile(episodeFileId);
+  const queueItem = useQueueItemForEpisode(id);
+  const { longDateFormat, timeFormat } = useUiSettingsValues();
+
+  const {
+    showCoverArt,
+    showEpisodeInformation,
+    showFinaleIcon,
+    showSpecialIcon,
+    showCutoffUnmetIcon,
+  } = useCalendarOptions();
+
+  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+
+  const startTime = moment(airDateUtc);
+  const endTime = moment(airDateUtc).add(series.runtime, 'minutes');
+  const downloading = !!(queueItem || grabbed);
+  const isMonitored = series.monitored && monitored;
+  const statusStyle = getStatusStyle(
+    hasFile,
+    downloading,
+    startTime,
+    endTime,
+    isMonitored
+  );
+  const missingAbsoluteNumber =
+    series.seriesType === 'anime' && seasonNumber > 0 && !absoluteEpisodeNumber;
+  const eventLabel = translate('CalendarOpenEpisodeDetails', {
+    series: series.title,
+    episode: `${seasonNumber}x${padNumber(episodeNumber, 2)}`,
+    title,
+    airDate: formatDateTime(airDateUtc, longDateFormat, timeFormat),
+    status: getCalendarStatusLabel(statusStyle),
+  });
+
+  const handlePress = useCallback(() => {
+    setIsDetailsModalOpen(true);
+  }, []);
+
+  const handleDetailsModalClose = useCallback(() => {
+    setIsDetailsModalOpen(false);
+  }, []);
+
+  return (
+    <div className={classNames(styles.event, styles[statusStyle])}>
+      <Link
+        className={styles.underlay}
+        aria-label={eventLabel}
+        onPress={handlePress}
+      />
+
+      {showCoverArt ? (
+        <SeriesPoster
+          className={styles.cover}
+          images={series.images}
+          title={series.title}
+          size={250}
+          lazy={false}
+        />
+      ) : null}
+
+      <div className={styles.overlay}>
+        <div className={classNames(styles.eventWrapper, styles[statusStyle])}>
+          <div className={styles.time}>
+            {formatTime(airDateUtc, timeFormat)} -{' '}
+            {formatTime(endTime.toISOString(), timeFormat, {
+              includeMinuteZero: true,
+            })}
+          </div>
+
+          <div className={styles.seriesTitle}>{series.title}</div>
+
+          {showEpisodeInformation ? (
+            <div className={styles.seasonEpisodeNumber}>
+              {seasonNumber}x{padNumber(episodeNumber, 2)}
+              {series.seriesType === 'anime' && absoluteEpisodeNumber && (
+                <span className={styles.absoluteEpisodeNumber}>
+                  ({absoluteEpisodeNumber})
+                </span>
+              )}
+              <div className={styles.episodeSeparator}> - </div>
+            </div>
+          ) : null}
+
+          <div className={styles.episodeTitle}>
+            {showEpisodeInformation ? title : null}
+          </div>
+
+          {missingAbsoluteNumber ? (
+            <Icon
+              className={styles.statusIcon}
+              name={icons.WARNING}
+              kind={kinds.WARNING}
+              title={translate('EpisodeMissingAbsoluteNumber')}
+            />
+          ) : null}
+
+          {unverifiedSceneNumbering && !missingAbsoluteNumber ? (
+            <Icon
+              className={styles.statusIcon}
+              name={icons.WARNING}
+              kind={kinds.WARNING}
+              title={translate('SceneNumberNotVerified')}
+            />
+          ) : null}
+
+          {queueItem ? (
+            <span className={styles.statusIcon}>
+              <CalendarEventQueueDetails {...queueItem} />
+            </span>
+          ) : null}
+
+          {!queueItem && grabbed ? (
+            <Icon
+              className={styles.statusIcon}
+              name={icons.DOWNLOADING}
+              title={translate('EpisodeIsDownloading')}
+            />
+          ) : null}
+
+          {showCutoffUnmetIcon &&
+          episodeFile &&
+          episodeFile.qualityCutoffNotMet ? (
+            <Icon
+              className={styles.statusIcon}
+              name={icons.CUTOFF_NOT_MET}
+              kind={kinds.WARNING}
+              title={translate('QualityCutoffNotMet')}
+            />
+          ) : null}
+
+          {episodeNumber === 1 && seasonNumber > 0 && (
+            <Icon
+              className={styles.statusIcon}
+              name={icons.PREMIERE}
+              kind={kinds.INFO}
+              title={
+                seasonNumber === 1
+                  ? translate('SeriesPremiere')
+                  : translate('SeasonPremiere')
+              }
+            />
+          )}
+
+          {showFinaleIcon && finaleType ? (
+            <Icon
+              className={styles.statusIcon}
+              name={
+                finaleType === 'series'
+                  ? icons.FINALE_SERIES
+                  : icons.FINALE_SEASON
+              }
+              kind={finaleType === 'series' ? kinds.DANGER : kinds.WARNING}
+              title={getFinaleTypeName(finaleType)}
+            />
+          ) : null}
+
+          {showSpecialIcon && (episodeNumber === 0 || seasonNumber === 0) ? (
+            <Icon
+              className={styles.statusIcon}
+              name={icons.SPECIAL}
+              kind={kinds.PINK}
+              title={translate('Special')}
+            />
+          ) : null}
+        </div>
+      </div>
+
+      <EpisodeDetailsModal
+        isOpen={isDetailsModalOpen}
+        episodeId={id}
+        episodeEntity={episodeEntities.CALENDAR}
+        seriesId={series.id}
+        episodeTitle={title}
+        onModalClose={handleDetailsModalClose}
+      />
+    </div>
+  );
+}
+
+export default AgendaEvent;

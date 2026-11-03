@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using NLog;
 using NzbDrone.Common.Disk;
@@ -85,23 +84,8 @@ namespace NzbDrone.Core.MediaFiles.EpisodeImport
                         continue;
                     }
 
-                    var episodeFile = new EpisodeFile();
-                    episodeFile.DateAdded = DateTime.UtcNow;
-                    episodeFile.SeriesId = localEpisode.Series.Id;
-                    episodeFile.Path = localEpisode.Path.CleanFilePath();
+                    var episodeFile = localEpisode.ToEpisodeFile();
                     episodeFile.Size = _diskProvider.GetFileSize(localEpisode.Path);
-                    episodeFile.Quality = localEpisode.Quality;
-                    episodeFile.MediaInfo = localEpisode.MediaInfo;
-                    episodeFile.SeasonNumber = localEpisode.SeasonNumber;
-                    episodeFile.Episodes = localEpisode.Episodes;
-                    episodeFile.ReleaseGroup = localEpisode.ReleaseGroup;
-                    episodeFile.ReleaseHash = localEpisode.ReleaseHash;
-                    episodeFile.Languages = localEpisode.Languages;
-
-                    // Prefer the release type from the download client, folder and finally the file so we have the most accurate information.
-                    episodeFile.ReleaseType = localEpisode.DownloadClientEpisodeInfo?.ReleaseType ??
-                                              localEpisode.FolderEpisodeInfo?.ReleaseType ??
-                                              localEpisode.FileEpisodeInfo.ReleaseType;
 
                     if (downloadClientItem?.DownloadId.IsNotNullOrWhiteSpace() == true)
                     {
@@ -115,23 +99,11 @@ namespace NzbDrone.Core.MediaFiles.EpisodeImport
                         }
 
                         // Prefer the release type from the grabbed history
-                        if (Enum.TryParse(grabHistory?.Data.GetValueOrDefault("releaseType"), true, out ReleaseType releaseType))
+                        if (Enum.TryParse(grabHistory?.Data.GetValueOrDefault("releaseType"), true, out ReleaseType releaseType) &&
+                            releaseType != ReleaseType.Unknown)
                         {
                             episodeFile.ReleaseType = releaseType;
                         }
-                    }
-                    else
-                    {
-                        episodeFile.IndexerFlags = localEpisode.IndexerFlags;
-                    }
-
-                    // Fall back to parsed information if history is unavailable or missing
-                    if (episodeFile.ReleaseType == ReleaseType.Unknown)
-                    {
-                        // Prefer the release type from the download client, folder and finally the file so we have the most accurate information.
-                        episodeFile.ReleaseType = localEpisode.DownloadClientEpisodeInfo?.ReleaseType ??
-                                                  localEpisode.FolderEpisodeInfo?.ReleaseType ??
-                                                  localEpisode.FileEpisodeInfo.ReleaseType;
                     }
 
                     bool copyOnly;
@@ -139,7 +111,7 @@ namespace NzbDrone.Core.MediaFiles.EpisodeImport
                     {
                         default:
                         case ImportMode.Auto:
-                            copyOnly = downloadClientItem != null && !downloadClientItem.CanMoveFiles;
+                            copyOnly = downloadClientItem is { CanMoveFiles: false };
                             break;
                         case ImportMode.Move:
                             copyOnly = false;
@@ -151,15 +123,20 @@ namespace NzbDrone.Core.MediaFiles.EpisodeImport
 
                     if (newDownload)
                     {
-                        episodeFile.SceneName = localEpisode.SceneName;
-                        episodeFile.OriginalFilePath = GetOriginalFilePath(downloadClientItem, localEpisode);
+                        if (downloadClientItem is { OutputPath.IsEmpty: false })
+                        {
+                            var outputDirectory = downloadClientItem.OutputPath.Directory.ToString();
+
+                            if (outputDirectory.IsParentPath(localEpisode.Path))
+                            {
+                                episodeFile.OriginalFilePath = outputDirectory.GetRelativePath(localEpisode.Path);
+                            }
+                        }
 
                         oldFiles = _episodeFileUpgrader.UpgradeEpisodeFile(episodeFile, localEpisode, copyOnly).OldFiles;
                     }
                     else
                     {
-                        episodeFile.RelativePath = localEpisode.Series.Path.GetRelativePath(episodeFile.Path);
-
                         // Delete existing files from the DB mapped to this path
                         var previousFiles = _mediaFileService.GetFilesWithRelativePath(localEpisode.Series.Id, episodeFile.RelativePath);
 
@@ -170,15 +147,15 @@ namespace NzbDrone.Core.MediaFiles.EpisodeImport
                     }
 
                     episodeFile = _mediaFileService.Add(episodeFile);
-                    importResults.Add(new ImportResult(importDecision));
+                    importResults.Add(new ImportResult(importDecision, episodeFile));
 
                     if (newDownload)
                     {
                         if (localEpisode.ScriptImported)
                         {
-                            _existingExtraFiles.ImportExtraFiles(localEpisode.Series, localEpisode.PossibleExtraFiles);
+                            _existingExtraFiles.ImportExtraFiles(localEpisode.Series, localEpisode.PossibleExtraFiles, localEpisode.FileNameBeforeRename);
 
-                            if (localEpisode.FileRenamedAfterScriptImport)
+                            if (localEpisode.FileNameBeforeRename != episodeFile.RelativePath)
                             {
                                 _extraService.MoveFilesAfterRename(localEpisode.Series, episodeFile);
                             }
@@ -213,55 +190,25 @@ namespace NzbDrone.Core.MediaFiles.EpisodeImport
 
                     importResults.Add(new ImportResult(importDecision, "Failed to import episode, unable to move existing file to the Recycle Bin."));
                 }
+                catch (UnauthorizedAccessException e)
+                {
+                    _logger.Warn(e, "Couldn't import episode " + localEpisode);
+                    _eventAggregator.PublishEvent(new EpisodeImportFailedEvent(e, localEpisode, newDownload, downloadClientItem));
+
+                    importResults.Add(new ImportResult(importDecision, "Failed to import episode due to permission issues.", e.Message));
+                }
                 catch (Exception e)
                 {
                     _logger.Warn(e, "Couldn't import episode " + localEpisode);
-                    importResults.Add(new ImportResult(importDecision, "Failed to import episode"));
+                    importResults.Add(new ImportResult(importDecision, "Failed to import episode", e.Message));
                 }
             }
 
             // Adding all the rejected decisions
             importResults.AddRange(decisions.Where(c => !c.Approved)
-                                            .Select(d => new ImportResult(d, d.Rejections.Select(r => r.Reason).ToArray())));
+                                            .Select(d => new ImportResult(d, d.Rejections.Select(r => r.Message).ToArray())));
 
             return importResults;
-        }
-
-        private string GetOriginalFilePath(DownloadClientItem downloadClientItem, LocalEpisode localEpisode)
-        {
-            var path = localEpisode.Path;
-
-            if (downloadClientItem != null && !downloadClientItem.OutputPath.IsEmpty)
-            {
-                var outputDirectory = downloadClientItem.OutputPath.Directory.ToString();
-
-                if (outputDirectory.IsParentPath(path))
-                {
-                    return outputDirectory.GetRelativePath(path);
-                }
-            }
-
-            var folderEpisodeInfo = localEpisode.FolderEpisodeInfo;
-
-            if (folderEpisodeInfo != null)
-            {
-                var folderPath = path.GetAncestorPath(folderEpisodeInfo.ReleaseTitle);
-
-                if (folderPath != null)
-                {
-                    return folderPath.GetParentPath().GetRelativePath(path);
-                }
-            }
-
-            var parentPath = path.GetParentPath();
-            var grandparentPath = parentPath.GetParentPath();
-
-            if (grandparentPath != null)
-            {
-                return grandparentPath.GetRelativePath(path);
-            }
-
-            return Path.GetFileName(path);
         }
     }
 }

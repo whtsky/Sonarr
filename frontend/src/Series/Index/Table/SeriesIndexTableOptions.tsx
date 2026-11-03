@@ -1,62 +1,51 @@
-import React, { Fragment, useCallback } from 'react';
-import { useSelector } from 'react-redux';
-import FormGroup from 'Components/Form/FormGroup';
-import FormInputGroup from 'Components/Form/FormInputGroup';
+import React, { useCallback } from 'react';
+import FormInput from 'Components/Form/FormInput';
+import FormInputHelpText from 'Components/Form/FormInputHelpText';
 import FormLabel from 'Components/Form/FormLabel';
+import FormRow from 'Components/Form/FormRow';
 import { inputTypes } from 'Helpers/Props';
-import { CheckInputChanged } from 'typings/inputs';
+import {
+  setSeriesTableOptions,
+  useSeriesTableOptions,
+} from 'Series/seriesOptionsStore';
+import { InputChanged } from 'typings/inputs';
 import translate from 'Utilities/String/translate';
-import selectTableOptions from './selectTableOptions';
 
-interface SeriesIndexTableOptionsProps {
-  onTableOptionChange(...args: unknown[]): unknown;
-}
+function SeriesIndexTableOptions() {
+  const { showBanners, showSearchAction } = useSeriesTableOptions();
 
-function SeriesIndexTableOptions(props: SeriesIndexTableOptionsProps) {
-  const { onTableOptionChange } = props;
-
-  const tableOptions = useSelector(selectTableOptions);
-
-  const { showBanners, showSearchAction } = tableOptions;
-
-  const onTableOptionChangeWrapper = useCallback(
-    ({ name, value }: CheckInputChanged) => {
-      onTableOptionChange({
-        tableOptions: {
-          ...tableOptions,
-          [name]: value,
-        },
+  const handleTableOptionChange = useCallback(
+    ({ name, value }: InputChanged<boolean>) => {
+      setSeriesTableOptions({
+        [name]: value,
       });
     },
-    [tableOptions, onTableOptionChange]
+    []
   );
 
   return (
-    <Fragment>
-      <FormGroup>
+    <>
+      <FormRow>
         <FormLabel>{translate('ShowBanners')}</FormLabel>
-
-        <FormInputGroup
+        <FormInputHelpText text={translate('ShowBannersHelpText')} />
+        <FormInput
           type={inputTypes.CHECK}
           name="showBanners"
           value={showBanners}
-          helpText={translate('ShowBannersHelpText')}
-          onChange={onTableOptionChangeWrapper}
+          onChange={handleTableOptionChange}
         />
-      </FormGroup>
-
-      <FormGroup>
+      </FormRow>
+      <FormRow>
         <FormLabel>{translate('ShowSearch')}</FormLabel>
-
-        <FormInputGroup
+        <FormInputHelpText text={translate('ShowSearchHelpText')} />
+        <FormInput
           type={inputTypes.CHECK}
           name="showSearchAction"
           value={showSearchAction}
-          helpText={translate('ShowSearchHelpText')}
-          onChange={onTableOptionChangeWrapper}
+          onChange={handleTableOptionChange}
         />
-      </FormGroup>
-    </Fragment>
+      </FormRow>
+    </>
   );
 }
 

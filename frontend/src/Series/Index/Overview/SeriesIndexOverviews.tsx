@@ -1,25 +1,20 @@
 import { throttle } from 'lodash';
 import React, { RefObject, useEffect, useMemo, useRef, useState } from 'react';
-import { useSelector } from 'react-redux';
 import { FixedSizeList as List, ListChildComponentProps } from 'react-window';
 import useMeasure from 'Helpers/Hooks/useMeasure';
 import Series from 'Series/Series';
+import { useSeriesOverviewOptions } from 'Series/seriesOptionsStore';
 import dimensions from 'Styles/Variables/dimensions';
 import getIndexOfFirstCharacter from 'Utilities/Array/getIndexOfFirstCharacter';
-import selectOverviewOptions from './selectOverviewOptions';
+import { ROW_BORDER, ROW_VERTICAL_PADDING } from './overviewLayout';
 import SeriesIndexOverview from './SeriesIndexOverview';
 
-// Poster container dimensions
-const columnPadding = parseInt(dimensions.seriesIndexColumnPadding);
-const columnPaddingSmallScreen = parseInt(
-  dimensions.seriesIndexColumnPaddingSmallScreen
-);
-const progressBarHeight = parseInt(dimensions.progressBarSmallHeight);
-const detailedProgressBarHeight = parseInt(dimensions.progressBarMediumHeight);
-const bodyPadding = parseInt(dimensions.pageContentBodyPadding);
-const bodyPaddingSmallScreen = parseInt(
-  dimensions.pageContentBodyPaddingSmallScreen
-);
+const progressBarHeight = dimensions.progressBarSmallHeight;
+const detailedProgressBarHeight = dimensions.progressBarMediumHeight;
+const bodyPadding = dimensions.pageContentBodyPadding;
+const bodyPaddingSmallScreen = dimensions.pageContentBodyPaddingSmallScreen;
+
+const POSTER_PROGRESS_GAP = 6;
 
 interface RowItemData {
   items: Series[];
@@ -28,7 +23,6 @@ interface RowItemData {
   posterHeight: number;
   rowHeight: number;
   isSelectMode: boolean;
-  isSmallScreen: boolean;
 }
 
 interface SeriesIndexOverviewsProps {
@@ -42,11 +36,7 @@ interface SeriesIndexOverviewsProps {
   isSmallScreen: boolean;
 }
 
-const Row: React.FC<ListChildComponentProps<RowItemData>> = ({
-  index,
-  style,
-  data,
-}) => {
+function Row({ index, style, data }: ListChildComponentProps<RowItemData>) {
   const { items, ...otherData } = data;
 
   if (index >= items.length) {
@@ -60,7 +50,7 @@ const Row: React.FC<ListChildComponentProps<RowItemData>> = ({
       <SeriesIndexOverview seriesId={series.id} {...otherData} />
     </div>
   );
-};
+}
 
 function getWindowScrollTopPosition() {
   return document.documentElement.scrollTop || document.body.scrollTop || 0;
@@ -76,25 +66,23 @@ function SeriesIndexOverviews(props: SeriesIndexOverviewsProps) {
     isSmallScreen,
   } = props;
 
-  const { size: posterSize, detailedProgressBar } = useSelector(
-    selectOverviewOptions
-  );
+  const { size: posterSize, detailedProgressBar } = useSeriesOverviewOptions();
   const listRef = useRef<List>(null);
   const [measureRef, bounds] = useMeasure();
   const [size, setSize] = useState({ width: 0, height: 0 });
 
   const posterWidth = useMemo(() => {
-    const maxiumPosterWidth = isSmallScreen ? 152 : 162;
+    const maximumPosterWidth = isSmallScreen ? 152 : 162;
 
     if (posterSize === 'large') {
-      return maxiumPosterWidth;
+      return maximumPosterWidth;
     }
 
     if (posterSize === 'medium') {
-      return Math.floor(maxiumPosterWidth * 0.75);
+      return Math.floor(maximumPosterWidth * 0.75);
     }
 
-    return Math.floor(maxiumPosterWidth * 0.5);
+    return Math.floor(maximumPosterWidth * 0.5);
   }, [posterSize, isSmallScreen]);
 
   const posterHeight = useMemo(() => {
@@ -102,14 +90,19 @@ function SeriesIndexOverviews(props: SeriesIndexOverviewsProps) {
   }, [posterWidth]);
 
   const rowHeight = useMemo(() => {
-    const heights = [
-      posterHeight,
-      detailedProgressBar ? detailedProgressBarHeight : progressBarHeight,
-      isSmallScreen ? columnPaddingSmallScreen : columnPadding,
-    ];
+    const progress = detailedProgressBar
+      ? detailedProgressBarHeight
+      : progressBarHeight;
 
-    return heights.reduce((acc, height) => acc + height, 0);
-  }, [detailedProgressBar, posterHeight, isSmallScreen]);
+    // Used as the virtual list's itemSize, so it has to match the real row height.
+    return (
+      posterHeight +
+      POSTER_PROGRESS_GAP +
+      progress +
+      ROW_VERTICAL_PADDING * 2 +
+      ROW_BORDER
+    );
+  }, [detailedProgressBar, posterHeight]);
 
   useEffect(() => {
     const current = scrollerRef.current as HTMLElement;
@@ -201,7 +194,6 @@ function SeriesIndexOverviews(props: SeriesIndexOverviewsProps) {
           posterHeight,
           rowHeight,
           isSelectMode,
-          isSmallScreen,
         }}
       >
         {Row}

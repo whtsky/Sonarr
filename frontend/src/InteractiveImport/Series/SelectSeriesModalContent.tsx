@@ -6,7 +6,6 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { useSelector } from 'react-redux';
 import { FixedSizeList as List, ListChildComponentProps } from 'react-window';
 import TextInput from 'Components/Form/TextInput';
 import Button from 'Components/Link/Button';
@@ -19,12 +18,14 @@ import Column from 'Components/Table/Column';
 import VirtualTableRowButton from 'Components/Table/VirtualTableRowButton';
 import { scrollDirections } from 'Helpers/Props';
 import Series from 'Series/Series';
-import createAllSeriesSelector from 'Store/Selectors/createAllSeriesSelector';
+import useSeries from 'Series/useSeries';
 import dimensions from 'Styles/Variables/dimensions';
+import { InputChanged } from 'typings/inputs';
+import sortByProp from 'Utilities/Array/sortByProp';
 import translate from 'Utilities/String/translate';
 import SelectSeriesModalTableHeader from './SelectSeriesModalTableHeader';
 import SelectSeriesRow from './SelectSeriesRow';
-import styles from './SelectSeriesModalContent.css';
+import styles from './SelectSeriesModalContent.module.css';
 
 const columns = [
   {
@@ -49,7 +50,7 @@ const columns = [
   },
 ];
 
-const bodyPadding = parseInt(dimensions.pageContentBodyPadding);
+const bodyPadding = dimensions.pageContentBodyPadding;
 
 interface SelectSeriesModalContentProps {
   modalTitle: string;
@@ -63,18 +64,19 @@ interface RowItemData {
   onSeriesSelect(seriesId: number): void;
 }
 
-const Row: React.FC<ListChildComponentProps<RowItemData>> = ({
-  index,
-  style,
-  data,
-}) => {
-  const { items, columns, onSeriesSelect } = data;
+function Row({ index, style, data }: ListChildComponentProps<RowItemData>) {
+  const { items, onSeriesSelect } = data;
+  const series = index >= items.length ? null : items[index];
 
-  if (index >= items.length) {
+  const handlePress = useCallback(() => {
+    if (series?.id) {
+      onSeriesSelect(series.id);
+    }
+  }, [series?.id, onSeriesSelect]);
+
+  if (series == null) {
     return null;
   }
-
-  const series = items[index];
 
   return (
     <VirtualTableRowButton
@@ -83,28 +85,25 @@ const Row: React.FC<ListChildComponentProps<RowItemData>> = ({
         justifyContent: 'space-between',
         ...style,
       }}
-      onPress={() => onSeriesSelect(series.id)}
+      onPress={handlePress}
     >
       <SelectSeriesRow
         key={series.id}
-        id={series.id}
         title={series.title}
         tvdbId={series.tvdbId}
         imdbId={series.imdbId}
         year={series.year}
-        columns={columns}
-        onSeriesSelect={onSeriesSelect}
       />
     </VirtualTableRowButton>
   );
-};
+}
 
 function SelectSeriesModalContent(props: SelectSeriesModalContentProps) {
   const { modalTitle, onSeriesSelect, onModalClose } = props;
 
   const listRef = useRef<List<RowItemData>>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
-  const allSeries: Series[] = useSelector(createAllSeriesSelector());
+  const { data: allSeries = [] } = useSeries();
   const [filter, setFilter] = useState('');
   const [size, setSize] = useState({ width: 0, height: 0 });
   const windowHeight = window.innerHeight;
@@ -147,7 +146,7 @@ function SelectSeriesModalContent(props: SelectSeriesModalContentProps) {
   }, [listRef, scrollerRef]);
 
   const onFilterChange = useCallback(
-    ({ value }: { value: string }) => {
+    ({ value }: InputChanged<string>) => {
       setFilter(value);
     },
     [setFilter]
@@ -162,18 +161,21 @@ function SelectSeriesModalContent(props: SelectSeriesModalContentProps) {
     [allSeries, onSeriesSelect]
   );
 
-  const items = useMemo(() => {
-    const sorted = [...allSeries].sort((a, b) =>
-      a.sortTitle.localeCompare(b.sortTitle)
-    );
+  const sortedSeries = useMemo(
+    () => [...allSeries].sort(sortByProp('sortTitle')),
+    [allSeries]
+  );
 
-    return sorted.filter(
-      (item) =>
-        item.title.toLowerCase().includes(filter.toLowerCase()) ||
-        item.tvdbId.toString().includes(filter) ||
-        item.imdbId?.includes(filter)
-    );
-  }, [allSeries, filter]);
+  const items = useMemo(
+    () =>
+      sortedSeries.filter(
+        (item) =>
+          item.title.toLowerCase().includes(filter.toLowerCase()) ||
+          item.tvdbId.toString().includes(filter) ||
+          item.imdbId?.includes(filter)
+      ),
+    [sortedSeries, filter]
+  );
 
   return (
     <ModalContent onModalClose={onModalClose}>
@@ -193,9 +195,9 @@ function SelectSeriesModalContent(props: SelectSeriesModalContentProps) {
         />
 
         <Scroller
+          ref={scrollerRef}
           className={styles.scroller}
           autoFocus={false}
-          ref={scrollerRef}
         >
           <SelectSeriesModalTableHeader columns={columns} />
           <List<RowItemData>

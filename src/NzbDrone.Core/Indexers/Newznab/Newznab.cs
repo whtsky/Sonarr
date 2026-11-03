@@ -21,6 +21,7 @@ namespace NzbDrone.Core.Indexers.Newznab
         public override string Name => "Newznab";
 
         public override DownloadProtocol Protocol => DownloadProtocol.Usenet;
+        public override IEnumerable<FailDownloads> DefaultFailDownloads => [FailDownloads.Executables, FailDownloads.PotentiallyDangerous];
         public override int PageSize => GetProviderPageSize();
 
         public Newznab(INewznabCapabilitiesProvider capabilitiesProvider, IHttpClient httpClient, IIndexerStatusService indexerStatusService, IConfigService configService, IParsingService parsingService, Logger logger, ILocalizationService localizationService)
@@ -50,14 +51,13 @@ namespace NzbDrone.Core.Indexers.Newznab
             {
                 yield return GetDefinition("DOGnzb", GetSettings("https://api.dognzb.cr"));
                 yield return GetDefinition("DrunkenSlug", GetSettings("https://drunkenslug.com"));
-                yield return GetDefinition("Nzb.su", GetSettings("https://api.nzb.su"));
+                yield return GetDefinition("Nzb.life", GetSettings("https://api.nzb.life"));
                 yield return GetDefinition("NZBCat", GetSettings("https://nzb.cat"));
                 yield return GetDefinition("NZBFinder.ws", GetSettings("https://nzbfinder.ws", categories: new[] { 5030, 5040, 5045 }));
                 yield return GetDefinition("NZBgeek", GetSettings("https://api.nzbgeek.info"));
                 yield return GetDefinition("nzbplanet.net", GetSettings("https://api.nzbplanet.net"));
                 yield return GetDefinition("SimplyNZBs", GetSettings("https://simplynzbs.com"));
                 yield return GetDefinition("Tabula Rasa", GetSettings("https://www.tabula-rasa.pw", apiPath: @"/api/v1/api"));
-                yield return GetDefinition("AnimeTosho Usenet", GetSettings("https://feed.animetosho.org", apiPath: @"/nabapi", categories: Array.Empty<int>(), animeCategories: new[] { 5070 }));
             }
         }
 
@@ -169,7 +169,10 @@ namespace NzbDrone.Core.Indexers.Newznab
         {
             try
             {
-                return Math.Min(100, Math.Max(_capabilitiesProvider.GetCapabilities(Settings).DefaultPageSize, _capabilitiesProvider.GetCapabilities(Settings).MaxPageSize));
+                return Math.Clamp(
+                    _capabilitiesProvider.GetCapabilities(Settings).DefaultPageSize,
+                    Math.Min(100, _capabilitiesProvider.GetCapabilities(Settings).MaxPageSize),
+                    _capabilitiesProvider.GetCapabilities(Settings).MaxPageSize);
             }
             catch
             {

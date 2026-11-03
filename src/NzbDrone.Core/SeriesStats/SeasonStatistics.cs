@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using NzbDrone.Common.Extensions;
 using NzbDrone.Core.Datastore;
+using NzbDrone.Core.Parser.Model;
+using NzbDrone.Core.Qualities;
 
 namespace NzbDrone.Core.SeriesStats
 {
@@ -17,8 +20,11 @@ namespace NzbDrone.Core.SeriesStats
         public int EpisodeCount { get; set; }
         public int AvailableEpisodeCount { get; set; }
         public int TotalEpisodeCount { get; set; }
+        public int MonitoredEpisodeCount { get; set; }
         public long SizeOnDisk { get; set; }
         public string ReleaseGroupsString { get; set; }
+        public string ReleaseTypesString { get; set; }
+        public string EpisodeFileQualitiesString { get; set; }
 
         public DateTime? NextAiring
         {
@@ -28,7 +34,7 @@ namespace NzbDrone.Core.SeriesStats
 
                 try
                 {
-                    if (!DateTime.TryParse(NextAiringString, out nextAiring))
+                    if (!DateTime.TryParse(NextAiringString, DateTimeFormatInfo.InvariantInfo, DateTimeStyles.AssumeUniversal, out nextAiring))
                     {
                         return null;
                     }
@@ -51,7 +57,7 @@ namespace NzbDrone.Core.SeriesStats
 
                 try
                 {
-                    if (!DateTime.TryParse(PreviousAiringString, out previousAiring))
+                    if (!DateTime.TryParse(PreviousAiringString, DateTimeFormatInfo.InvariantInfo, DateTimeStyles.AssumeUniversal, out previousAiring))
                     {
                         return null;
                     }
@@ -74,7 +80,7 @@ namespace NzbDrone.Core.SeriesStats
 
                 try
                 {
-                    if (!DateTime.TryParse(LastAiredString, out lastAired))
+                    if (!DateTime.TryParse(LastAiredString, DateTimeFormatInfo.InvariantInfo, DateTimeStyles.AssumeUniversal, out lastAired))
                     {
                         return null;
                     }
@@ -106,6 +112,43 @@ namespace NzbDrone.Core.SeriesStats
                 }
 
                 return releasegroups;
+            }
+        }
+
+        public List<ReleaseType> ReleaseTypes
+        {
+            get
+            {
+                if (ReleaseTypesString.IsNullOrWhiteSpace())
+                {
+                    return [];
+                }
+
+                return ReleaseTypesString
+                    .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(int.Parse)
+                    .Distinct()
+                    .Where(type => Enum.IsDefined(typeof(ReleaseType), type))
+                    .Select(type => (ReleaseType)type)
+                    .ToList();
+            }
+        }
+
+        public List<Quality> EpisodeFileQualities
+        {
+            get
+            {
+                if (EpisodeFileQualitiesString.IsNullOrWhiteSpace())
+                {
+                    return new List<Quality>();
+                }
+
+                return EpisodeFileQualitiesString
+                    .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(int.Parse)
+                    .Distinct()
+                    .Select(Quality.FindById)
+                    .ToList();
             }
         }
     }

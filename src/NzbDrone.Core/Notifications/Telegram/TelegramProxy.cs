@@ -1,19 +1,21 @@
 using System;
 using System.Collections.Generic;
 using System.Net;
+using System.Text;
 using System.Web;
 using FluentValidation.Results;
 using NLog;
 using NzbDrone.Common.Extensions;
 using NzbDrone.Common.Http;
 using NzbDrone.Common.Serializer;
+using NzbDrone.Core.Configuration;
 using NzbDrone.Core.Localization;
 
 namespace NzbDrone.Core.Notifications.Telegram
 {
     public interface ITelegramProxy
     {
-        void SendNotification(string title, string message, TelegramSettings settings);
+        void SendNotification(string title, string message, List<NotificationMetadataLink> links, TelegramSettings settings);
         ValidationFailure Test(TelegramSettings settings);
     }
 
@@ -22,30 +24,47 @@ namespace NzbDrone.Core.Notifications.Telegram
         private const string URL = "https://api.telegram.org";
 
         private readonly IHttpClient _httpClient;
+        private readonly IConfigFileProvider _configFileProvider;
         private readonly ILocalizationService _localizationService;
         private readonly Logger _logger;
 
-        public TelegramProxy(IHttpClient httpClient, ILocalizationService localizationService,  Logger logger)
+        public TelegramProxy(IHttpClient httpClient, IConfigFileProvider configFileProvider, ILocalizationService localizationService,  Logger logger)
         {
             _httpClient = httpClient;
+            _configFileProvider = configFileProvider;
             _localizationService = localizationService;
             _logger = logger;
         }
 
-        public void SendNotification(string title, string message, TelegramSettings settings)
+        public void SendNotification(string title, string message, List<NotificationMetadataLink> links, TelegramSettings settings)
         {
-            // Format text to add the title before and bold using markdown
-            var text = $"<b>{HttpUtility.HtmlEncode(title)}</b>\n{HttpUtility.HtmlEncode(message)}";
+            var text = new StringBuilder($"<b>{HttpUtility.HtmlEncode(title)}</b>\n");
+
+            text.AppendLine(HttpUtility.HtmlEncode(message));
+
+            foreach (var link in links)
+            {
+                text.AppendLine($"<a href=\"{link.Link}\">{HttpUtility.HtmlEncode(link.Label)}</a>");
+            }
 
             var requestBuilder = new HttpRequestBuilder(URL).Resource("bot{token}/sendmessage").Post();
 
             var request = requestBuilder.SetSegment("token", settings.BotToken)
-                                        .AddFormParameter("chat_id", settings.ChatId)
-                                        .AddFormParameter("parse_mode", "HTML")
-                                        .AddFormParameter("text", text)
-                                        .AddFormParameter("disable_notification", settings.SendSilently)
-                                        .AddFormParameter("message_thread_id", settings.TopicId)
+                                        .Accept(HttpAccept.Json)
                                         .Build();
+
+            request.Headers.ContentType = "application/json";
+
+            var payload = new TelegramPayload
+            {
+                ChatId = settings.ChatId,
+                Text = text.ToString(),
+                DisableNotification = settings.SendSilently,
+                MessageThreadId = settings.TopicId,
+                LinkPreviewOptions = new TelegramLinkPreviewOptions(links, settings)
+            };
+
+            request.SetContent(payload.ToJson());
 
             _httpClient.Post(request);
         }
@@ -54,10 +73,19 @@ namespace NzbDrone.Core.Notifications.Telegram
         {
             try
             {
+                const string brandedTitle = "Sonarr - Test Notification";
                 const string title = "Test Notification";
                 const string body = "This is a test message from Sonarr";
 
-                SendNotification(title, body, settings);
+                var links = new List<NotificationMetadataLink>
+                    {
+                        new NotificationMetadataLink(null, "Sonarr.tv", "https://sonarr.tv")
+                    };
+
+                var testMessageTitle = settings.IncludeAppNameInTitle ? brandedTitle : title;
+                testMessageTitle = settings.IncludeInstanceNameInTitle ? $"{testMessageTitle} - {_configFileProvider.InstanceName}" : testMessageTitle;
+
+                SendNotification(testMessageTitle, body, links, settings);
             }
             catch (Exception ex)
             {

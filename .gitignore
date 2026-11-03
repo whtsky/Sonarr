@@ -127,6 +127,7 @@ coverage*.xml
 coverage*.json
 setup/Output/
 *.~is
+.mono
 
 #VS outout folders
 bin
@@ -161,3 +162,9 @@ src/.idea/
 
 # API doc generation
 .config/
+dotnet-tools.json
+
+# Ignore Jetbrains IntelliJ Workspace Directories
+.idea/
+
+frontend/src/**/*.module.css.d.ts

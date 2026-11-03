@@ -1,23 +1,23 @@
 import classNames from 'classnames';
 import React, { useCallback } from 'react';
-import { useDispatch } from 'react-redux';
-import { useSelect } from 'App/SelectContext';
-import IconButton from 'Components/Link/IconButton';
+import { useSelect } from 'App/Select/SelectContext';
 import Column from 'Components/Table/Column';
+import TableOptionsButton from 'Components/Table/TableOptions/TableOptionsButton';
 import TableOptionsModalWrapper from 'Components/Table/TableOptions/TableOptionsModalWrapper';
 import VirtualTableHeader from 'Components/Table/VirtualTableHeader';
 import VirtualTableHeaderCell from 'Components/Table/VirtualTableHeaderCell';
 import VirtualTableSelectAllHeaderCell from 'Components/Table/VirtualTableSelectAllHeaderCell';
-import { icons } from 'Helpers/Props';
-import SortDirection from 'Helpers/Props/SortDirection';
+import { SortDirection } from 'Helpers/Props/sortDirections';
 import {
+  setSeriesOption,
   setSeriesSort,
-  setSeriesTableOption,
-} from 'Store/Actions/seriesIndexActions';
+  setSeriesTableOptions,
+} from 'Series/seriesOptionsStore';
 import { CheckInputChanged } from 'typings/inputs';
+import { TableOptionsChangePayload } from 'typings/Table';
 import hasGrowableColumns from './hasGrowableColumns';
 import SeriesIndexTableOptions from './SeriesIndexTableOptions';
-import styles from './SeriesIndexTableHeader.css';
+import styles from './SeriesIndexTableHeader.module.css';
 
 interface SeriesIndexTableHeaderProps {
   showBanners: boolean;
@@ -29,38 +29,47 @@ interface SeriesIndexTableHeaderProps {
 
 function SeriesIndexTableHeader(props: SeriesIndexTableHeaderProps) {
   const { showBanners, columns, sortKey, sortDirection, isSelectMode } = props;
-  const dispatch = useDispatch();
-  const [selectState, selectDispatch] = useSelect();
+  const { allSelected, allUnselected, selectAll, unselectAll } = useSelect();
 
   const onSortPress = useCallback(
-    (value: string) => {
-      dispatch(setSeriesSort({ sortKey: value }));
+    (sortKey: string, sortDirection?: SortDirection) => {
+      setSeriesSort({ sortKey, sortDirection });
     },
-    [dispatch]
+    []
   );
 
   const onTableOptionChange = useCallback(
-    (payload: unknown) => {
-      dispatch(setSeriesTableOption(payload));
+    (
+      payload: TableOptionsChangePayload & {
+        tableOptions?: { showBanners?: boolean; showSearchAction?: boolean };
+      }
+    ) => {
+      if (payload.tableOptions) {
+        setSeriesTableOptions(payload.tableOptions);
+      } else if (payload.columns) {
+        setSeriesOption('columns', payload.columns);
+      }
     },
-    [dispatch]
+    []
   );
 
   const onSelectAllChange = useCallback(
     ({ value }: CheckInputChanged) => {
-      selectDispatch({
-        type: value ? 'selectAll' : 'unselectAll',
-      });
+      if (value) {
+        selectAll();
+      } else {
+        unselectAll();
+      }
     },
-    [selectDispatch]
+    [selectAll, unselectAll]
   );
 
   return (
     <VirtualTableHeader>
       {isSelectMode ? (
         <VirtualTableSelectAllHeaderCell
-          allSelected={selectState.allSelected}
-          allUnselected={selectState.allUnselected}
+          allSelected={allSelected}
+          allUnselected={allUnselected}
           onSelectAllChange={onSelectAllChange}
         />
       ) : null}
@@ -85,7 +94,7 @@ function SeriesIndexTableHeader(props: SeriesIndexTableHeaderProps) {
                 optionsComponent={SeriesIndexTableOptions}
                 onTableOptionChange={onTableOptionChange}
               >
-                <IconButton name={icons.ADVANCED_SETTINGS} />
+                <TableOptionsButton />
               </TableOptionsModalWrapper>
             </VirtualTableHeaderCell>
           );

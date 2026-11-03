@@ -1,4 +1,5 @@
-using System.Collections.Generic;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
 namespace NzbDrone.Http
@@ -7,13 +8,13 @@ namespace NzbDrone.Http
     {
         [HttpGet("/api")]
         [Produces("application/json")]
-        public object GetApiInfo()
+        public Ok<ApiInfoResource> GetApiInfo()
         {
-            return new ApiInfoResource
+            return TypedResults.Ok(new ApiInfoResource
             {
-                Current = "v3",
-                Deprecated = new List<string>()
-            };
+                Current = "v5",
+                Deprecated = ["v3"]
+            });
         }
     }
 }

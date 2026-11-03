@@ -40,7 +40,7 @@ namespace NzbDrone.Core.HealthCheck.Checks
             var startupFolder = _appFolderInfo.StartUpFolder;
             var uiFolder = Path.Combine(startupFolder, "UI");
 
-            if ((OsInfo.IsWindows || _configFileProvider.UpdateAutomatically) &&
+            if (_configFileProvider.UpdateAutomatically &&
                 _configFileProvider.UpdateMechanism == UpdateMechanism.BuiltIn &&
                 !_osInfo.IsDocker)
             {
@@ -48,6 +48,7 @@ namespace NzbDrone.Core.HealthCheck.Checks
                 {
                     return new HealthCheck(GetType(),
                         HealthCheckResult.Error,
+                        HealthCheckReason.UpdateStartupTranslocation,
                         _localizationService.GetLocalizedString(
                             "UpdateStartupTranslocationHealthCheckMessage",
                             new Dictionary<string, object>
@@ -61,6 +62,7 @@ namespace NzbDrone.Core.HealthCheck.Checks
                 {
                     return new HealthCheck(GetType(),
                         HealthCheckResult.Error,
+                        HealthCheckReason.UpdateStartupNotWritable,
                         _localizationService.GetLocalizedString(
                             "UpdateStartupNotWritableHealthCheckMessage",
                             new Dictionary<string, object>
@@ -75,6 +77,7 @@ namespace NzbDrone.Core.HealthCheck.Checks
                 {
                     return new HealthCheck(GetType(),
                         HealthCheckResult.Error,
+                        HealthCheckReason.UpdateUiNotWritable,
                         _localizationService.GetLocalizedString(
                             "UpdateUiNotWritableHealthCheckMessage",
                             new Dictionary<string, object>
@@ -86,9 +89,21 @@ namespace NzbDrone.Core.HealthCheck.Checks
                 }
             }
 
-            if (BuildInfo.BuildDateTime < DateTime.UtcNow.AddDays(-14) && _checkUpdateService.AvailableUpdate() != null)
+            if (BuildInfo.BuildDateTime < DateTime.UtcNow.AddDays(-14))
             {
-                return new HealthCheck(GetType(), HealthCheckResult.Warning, _localizationService.GetLocalizedString("UpdateAvailableHealthCheckMessage"));
+                var latestAvailable = _checkUpdateService.AvailableUpdate();
+
+                if (latestAvailable != null)
+                {
+                    return new HealthCheck(GetType(),
+                        HealthCheckResult.Warning,
+                        HealthCheckReason.UpdateAvailable,
+                        _localizationService.GetLocalizedString("UpdateAvailableHealthCheckMessage", new Dictionary<string, object>
+                        {
+                            { "version", $"v{latestAvailable.Version}" }
+                        }),
+                        "#new-update-is-available");
+                }
             }
 
             return new HealthCheck(GetType());

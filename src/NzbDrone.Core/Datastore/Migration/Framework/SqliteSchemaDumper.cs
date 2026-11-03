@@ -120,7 +120,7 @@ namespace NzbDrone.Core.Datastore.Migration.Framework
                 column.IsPrimaryKey = upper.Contains("PRIMARY KEY");
                 column.IsIdentity = upper.Contains("AUTOINCREMENT");
                 column.IsNullable = !upper.Contains("NOT NULL") && !upper.Contains("PRIMARY KEY");
-                column.IsUnique = upper.Contains("UNIQUE") || upper.Contains("PRIMARY KEY");
+                column.IsUnique = upper.Contains("UNIQUE");
             }
 
             return column;
@@ -219,7 +219,7 @@ namespace NzbDrone.Core.Datastore.Migration.Framework
 
         protected virtual IList<TableDefinition> ReadTables()
         {
-            const string sqlCommand = @"SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;";
+            const string sqlCommand = @"SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_litestream_%' ORDER BY name;";
             var dtTable = Read(sqlCommand).Tables[0];
 
             var tableDefinitionList = new List<TableDefinition>();

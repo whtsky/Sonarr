@@ -1,41 +1,73 @@
-import React, { Fragment } from 'react';
-import { DndProvider } from 'react-dnd';
-import { HTML5Backend } from 'react-dnd-html5-backend';
-import PageContent from 'Components/Page/PageContent';
+import React, { useCallback, useState } from 'react';
 import PageContentBody from 'Components/Page/PageContentBody';
+import PageHeading from 'Components/Page/PageHeading';
+import { OverflowDivider } from 'Components/Page/Toolbar/Overflow';
 import PageToolbarSeparator from 'Components/Page/Toolbar/PageToolbarSeparator';
-import ParseToolbarButton from 'Parse/ParseToolbarButton';
-import SettingsToolbarConnector from 'Settings/SettingsToolbarConnector';
+import ToolbarItem from 'Components/Page/Toolbar/ToolbarItem';
+import SectionHeading from 'Components/SectionHeading';
+import { icons } from 'Helpers/Props';
+import settingsStyles from 'Settings/Settings.module.css';
+import SettingsPage from 'Settings/SettingsPage';
 import translate from 'Utilities/String/translate';
-import CustomFormatsConnector from './CustomFormats/CustomFormatsConnector';
+import CustomFormats from './CustomFormats/CustomFormats';
+import ManageCustomFormatsModal from './CustomFormats/Manage/ManageCustomFormatsModal';
 
 function CustomFormatSettingsPage() {
+  const [isManageCustomFormatsOpen, setIsManageCustomFormatsOpen] =
+    useState(false);
+
+  const handleManageCustomFormatsPress = useCallback(() => {
+    setIsManageCustomFormatsOpen(true);
+  }, []);
+
+  const handleManageCustomFormatsClose = useCallback(() => {
+    setIsManageCustomFormatsOpen(false);
+  }, []);
+
   return (
-    <PageContent title={translate('CustomFormatsSettings')}>
-      <SettingsToolbarConnector
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore
-        showSave={false}
-        additionalButtons={
-          <Fragment>
+    <SettingsPage
+      title={translate('CustomFormatsSettings')}
+      showSave={false}
+      toolbarChildren={
+        <>
+          <OverflowDivider groupId="extras">
             <PageToolbarSeparator />
+          </OverflowDivider>
 
-            <ParseToolbarButton />
-          </Fragment>
-        }
-      />
-
+          <ToolbarItem
+            id="manage-custom-formats"
+            priority={1}
+            groupId="extras"
+            label={translate('ManageFormats')}
+            iconName={icons.MANAGE}
+            onPress={handleManageCustomFormatsPress}
+          />
+        </>
+      }
+    >
       <PageContentBody>
-        {/* TODO: Upgrade react-dnd to get typings, we're 2 major versions behind */}
-        {/* eslint-disable-next-line @typescript-eslint/ban-ts-comment */}
-        {/* @ts-ignore */}
-        <DndProvider backend={HTML5Backend}>
-          {/* eslint-disable-next-line @typescript-eslint/ban-ts-comment */}
-          {/* @ts-ignore */}
-          <CustomFormatsConnector />
-        </DndProvider>
+        <div className={settingsStyles.section}>
+          <PageHeading
+            scope={translate('Settings')}
+            title={translate('CustomFormats')}
+          />
+
+          <div className={settingsStyles.pageSection}>
+            <SectionHeading
+              title={translate('CustomFormats')}
+              description={translate('CustomFormatsSectionDescription')}
+            />
+
+            <CustomFormats />
+          </div>
+        </div>
       </PageContentBody>
-    </PageContent>
+
+      <ManageCustomFormatsModal
+        isOpen={isManageCustomFormatsOpen}
+        onModalClose={handleManageCustomFormatsClose}
+      />
+    </SettingsPage>
   );
 }
 

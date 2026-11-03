@@ -274,7 +274,7 @@ namespace NzbDrone.Core.Test.OrganizerTests.FileNameBuilderTests
         {
             _namingConfig.RenameEpisodes = false;
             _episodeFile.RelativePath = null;
-            _episodeFile.Path = @"C:\Test\Unsorted\Series - S01E01 - Test";
+            _episodeFile.Path = @"C:\Test\Unsorted\Series - S01E01 - Test".AsOsAgnostic();
 
             Subject.BuildFileName(new List<Episode> { _episode1 }, _series, _episodeFile)
                    .Should().Be(Path.GetFileNameWithoutExtension(_episodeFile.Path));
@@ -289,6 +289,20 @@ namespace NzbDrone.Core.Test.OrganizerTests.FileNameBuilderTests
 
             Subject.BuildFileName(new List<Episode> { _episode1 }, _series, _episodeFile)
                    .Should().Be("30.Rock.S01E01.xvid-LOL");
+        }
+
+        [Test]
+        public void should_replace_illegal_characters_when_renaming_is_disabled()
+        {
+            _namingConfig.RenameEpisodes = false;
+            _namingConfig.ReplaceIllegalCharacters = true;
+            _namingConfig.ColonReplacementFormat = ColonReplacementFormat.Smart;
+
+            _episodeFile.SceneName = "30.Rock.S01E01.xvid:LOL";
+            _episodeFile.RelativePath = "30 Rock - S01E01 - Test";
+
+            Subject.BuildFileName(new List<Episode> { _episode1 }, _series, _episodeFile)
+                .Should().Be("30.Rock.S01E01.xvid-LOL");
         }
 
         [Test]
@@ -544,9 +558,25 @@ namespace NzbDrone.Core.Test.OrganizerTests.FileNameBuilderTests
             _episodeFile.MediaInfo = new Core.MediaFiles.MediaInfo.MediaInfoModel()
             {
                 VideoFormat = "h264",
-                AudioFormat = "dts",
-                AudioLanguages = new List<string> { "eng", "spa" },
-                Subtitles = new List<string> { "eng", "spa", "ita" }
+                AudioStreams =
+                [
+                    new MediaInfoAudioStreamModel
+                    {
+                        Format = "dts",
+                        Language = "eng",
+                    },
+                    new MediaInfoAudioStreamModel
+                    {
+                        Format = "dts",
+                        Language = "spa",
+                    },
+                ],
+                SubtitleStreams =
+                [
+                    new MediaInfoSubtitleStreamModel { Language = "eng" },
+                    new MediaInfoSubtitleStreamModel { Language = "spa" },
+                    new MediaInfoSubtitleStreamModel { Language = "ita" },
+                ],
             };
 
             Subject.BuildFileName(new List<Episode> { _episode1 }, _series, _episodeFile)
@@ -561,10 +591,14 @@ namespace NzbDrone.Core.Test.OrganizerTests.FileNameBuilderTests
         [TestCase("rum", "RO")]
         [TestCase("per", "FA")]
         [TestCase("ger", "DE")]
+        [TestCase("gsw", "DE")]
         [TestCase("cze", "CS")]
         [TestCase("ice", "IS")]
         [TestCase("dut", "NL")]
         [TestCase("nor", "NO")]
+        [TestCase("geo", "KA")]
+        [TestCase("kat", "KA")]
+        [TestCase("gle", "GA")]
         public void should_format_languagecodes_properly(string language, string code)
         {
             _namingConfig.StandardEpisodeFormat = "{Series.Title}.S{season:00}E{episode:00}.{Episode.Title}.{MEDIAINFO.FULL}";
@@ -572,10 +606,19 @@ namespace NzbDrone.Core.Test.OrganizerTests.FileNameBuilderTests
             _episodeFile.MediaInfo = new Core.MediaFiles.MediaInfo.MediaInfoModel()
             {
                 VideoFormat = "h264",
-                AudioFormat = "dts",
-                AudioChannels = 6,
-                AudioLanguages = new List<string> { "eng" },
-                Subtitles = new List<string> { language },
+                AudioStreams =
+                [
+                    new MediaInfoAudioStreamModel
+                    {
+                        Format = "dts",
+                        Channels = 6,
+                        Language = "eng",
+                    },
+                ],
+                SubtitleStreams =
+                [
+                    new MediaInfoSubtitleStreamModel { Language = language },
+                ],
                 SchemaRevision = 3
             };
 
@@ -591,9 +634,20 @@ namespace NzbDrone.Core.Test.OrganizerTests.FileNameBuilderTests
             _episodeFile.MediaInfo = new Core.MediaFiles.MediaInfo.MediaInfoModel()
             {
                 VideoFormat = "h264",
-                AudioFormat = "dts",
-                AudioLanguages = new List<string> { "eng" },
-                Subtitles = new List<string> { "eng", "spa", "ita" }
+                AudioStreams =
+                [
+                    new MediaInfoAudioStreamModel
+                    {
+                        Format = "dts",
+                        Language = "eng",
+                    },
+                ],
+                SubtitleStreams =
+                [
+                    new MediaInfoSubtitleStreamModel { Language = "eng" },
+                    new MediaInfoSubtitleStreamModel { Language = "spa" },
+                    new MediaInfoSubtitleStreamModel { Language = "ita" },
+                ],
             };
 
             Subject.BuildFileName(new List<Episode> { _episode1 }, _series, _episodeFile)
@@ -975,10 +1029,21 @@ namespace NzbDrone.Core.Test.OrganizerTests.FileNameBuilderTests
                 .Callback((EpisodeFile e, Series s) => e.MediaInfo = new MediaInfoModel
                 {
                     VideoFormat = "AVC",
-                    AudioFormat = "DTS",
-                    AudioChannels = 6,
-                    AudioLanguages = new List<string> { "eng" },
-                    Subtitles = new List<string> { "eng", "esp", "ita" },
+                    AudioStreams =
+                    [
+                        new MediaInfoAudioStreamModel
+                        {
+                            Format = "dts",
+                            Channels = 6,
+                            Language = "eng",
+                        },
+                    ],
+                    SubtitleStreams =
+                    [
+                        new MediaInfoSubtitleStreamModel { Language = "eng" },
+                        new MediaInfoSubtitleStreamModel { Language = "esp" },
+                        new MediaInfoSubtitleStreamModel { Language = "ita" },
+                    ],
                     VideoBitDepth = 10,
                     VideoColourPrimaries = "bt2020",
                     VideoTransferCharacteristics = "PQ",
@@ -1013,6 +1078,15 @@ namespace NzbDrone.Core.Test.OrganizerTests.FileNameBuilderTests
                    .Should().Be(string.Empty);
         }
 
+        [Test]
+        public void should_maintain_ellipsis_in_naming_format()
+        {
+            _namingConfig.StandardEpisodeFormat = "{Series.Title}.S{season:00}.E{episode:00}...{Episode.CleanTitle}";
+
+            Subject.BuildFileName(new List<Episode> { _episode1 }, _series, _episodeFile)
+                .Should().Be("South.Park.S15.E06...City.Sushi");
+        }
+
         private void GivenMediaInfoModel(string videoCodec = "h264",
                                          string audioCodec = "dts",
                                          int audioChannels = 6,
@@ -1025,10 +1099,18 @@ namespace NzbDrone.Core.Test.OrganizerTests.FileNameBuilderTests
             _episodeFile.MediaInfo = new MediaInfoModel
             {
                 VideoFormat = videoCodec,
-                AudioFormat = audioCodec,
-                AudioChannels = audioChannels,
-                AudioLanguages = audioLanguages.Split("/").ToList(),
-                Subtitles = subtitles.Split("/").ToList(),
+                AudioStreams = audioLanguages.Split('/')
+                    .Select(language => new MediaInfoAudioStreamModel
+                    {
+                        Format = audioCodec,
+                        Channels = audioChannels,
+                        Language = language,
+                    }).ToList(),
+                SubtitleStreams = subtitles.Split('/')
+                    .Select(language => new MediaInfoSubtitleStreamModel
+                    {
+                        Language = language
+                    }).ToList(),
                 VideoBitDepth = videoBitDepth,
                 VideoHdrFormat = hdrFormat,
                 SchemaRevision = schemaRevision

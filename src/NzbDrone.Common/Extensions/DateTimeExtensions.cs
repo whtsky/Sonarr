@@ -1,9 +1,11 @@
-﻿using System;
+using System;
 
 namespace NzbDrone.Common.Extensions
 {
     public static class DateTimeExtensions
     {
+        public static readonly DateTime EpochTime = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
         public static bool InNextDays(this DateTime dateTime, int days)
         {
             return InNext(dateTime, new TimeSpan(days, 0, 0, 0));
@@ -37,6 +39,16 @@ namespace NzbDrone.Common.Extensions
         public static bool Between(this DateTime dateTime, DateTime afterDateTime, DateTime beforeDateTime)
         {
             return dateTime >= afterDateTime && dateTime <= beforeDateTime;
+        }
+
+        public static DateTime WithoutTicks(this DateTime dateTime)
+        {
+            return dateTime.AddTicks(-(dateTime.Ticks % TimeSpan.TicksPerSecond));
+        }
+
+        public static DateTime WithTicksFrom(this DateTime dateTime, DateTime other)
+        {
+            return dateTime.WithoutTicks().AddTicks(other.Ticks % TimeSpan.TicksPerSecond);
         }
     }
 }

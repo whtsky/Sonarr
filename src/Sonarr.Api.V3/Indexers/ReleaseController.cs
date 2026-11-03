@@ -68,7 +68,7 @@ namespace Sonarr.Api.V3.Indexers
 
         [HttpPost]
         [Consumes("application/json")]
-        public async Task<object> DownloadRelease(ReleaseResource release)
+        public async Task<object> DownloadRelease([FromBody] ReleaseResource release)
         {
             var remoteEpisode = _remoteEpisodeCache.Find(GetCacheKey(release));
 
@@ -127,7 +127,7 @@ namespace Sonarr.Api.V3.Indexers
 
                         if (episodes.Empty())
                         {
-                            throw new NzbDroneClientException(HttpStatusCode.NotFound, "Unable to parse episodes in the release");
+                            throw new NzbDroneClientException(HttpStatusCode.NotFound, "Unable to parse episodes in the release, will need to be manually provided");
                         }
 
                         remoteEpisode.Series = series;
@@ -135,7 +135,7 @@ namespace Sonarr.Api.V3.Indexers
                     }
                     else
                     {
-                        throw new NzbDroneClientException(HttpStatusCode.NotFound, "Unable to find matching series and episodes");
+                        throw new NzbDroneClientException(HttpStatusCode.NotFound, "Unable to find matching series and episodes, will need to be manually provided");
                     }
                 }
                 else if (remoteEpisode.Episodes.Empty())
@@ -154,7 +154,7 @@ namespace Sonarr.Api.V3.Indexers
 
                 if (remoteEpisode.Episodes.Empty())
                 {
-                    throw new NzbDroneClientException(HttpStatusCode.NotFound, "Unable to parse episodes in the release");
+                    throw new NzbDroneClientException(HttpStatusCode.NotFound, "Unable to parse episodes in the release, will need to be manually provided");
                 }
 
                 await _downloadService.DownloadReport(remoteEpisode, release.DownloadClientId);
@@ -162,7 +162,7 @@ namespace Sonarr.Api.V3.Indexers
             catch (ReleaseDownloadException ex)
             {
                 _logger.Error(ex, ex.Message);
-                throw new NzbDroneClientException(HttpStatusCode.Conflict, "Getting release from indexer failed");
+                throw new NzbDroneClientException(HttpStatusCode.Conflict, $"Getting release from indexer failed: {ex.Message}");
             }
 
             return release;
@@ -180,6 +180,11 @@ namespace Sonarr.Api.V3.Indexers
             if (seriesId.HasValue && seasonNumber.HasValue)
             {
                 return await GetSeasonReleases(seriesId.Value, seasonNumber.Value);
+            }
+
+            if (seriesId.HasValue || seasonNumber.HasValue)
+            {
+                throw new NzbDroneClientException(HttpStatusCode.BadRequest, "seriesId and seasonNumber must be provided together");
             }
 
             return await GetRss();

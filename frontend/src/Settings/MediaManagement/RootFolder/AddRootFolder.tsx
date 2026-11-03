@@ -1,19 +1,15 @@
 import React, { useCallback, useState } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
 import Alert from 'Components/Alert';
 import FileBrowserModal from 'Components/FileBrowser/FileBrowserModal';
 import Icon from 'Components/Icon';
 import Button from 'Components/Link/Button';
-import { icons, kinds, sizes } from 'Helpers/Props';
-import { addRootFolder } from 'Store/Actions/rootFolderActions';
-import createRootFoldersSelector from 'Store/Selectors/createRootFoldersSelector';
+import { icons, kinds } from 'Helpers/Props';
+import { useAddRootFolder } from 'RootFolder/useRootFolders';
 import translate from 'Utilities/String/translate';
-import styles from './AddRootFolder.css';
+import styles from './AddRootFolder.module.css';
 
 function AddRootFolder() {
-  const { isSaving, saveError } = useSelector(createRootFoldersSelector());
-
-  const dispatch = useDispatch();
+  const { addRootFolder, isAdding, addError } = useAddRootFolder();
 
   const [isAddNewRootFolderModalOpen, setIsAddNewRootFolderModalOpen] =
     useState(false);
@@ -24,9 +20,9 @@ function AddRootFolder() {
 
   const onNewRootFolderSelect = useCallback(
     ({ value }: { value: string }) => {
-      dispatch(addRootFolder({ path: value }));
+      addRootFolder({ path: value });
     },
-    [dispatch]
+    [addRootFolder]
   );
 
   const onAddRootFolderModalClose = useCallback(() => {
@@ -35,28 +31,24 @@ function AddRootFolder() {
 
   return (
     <>
-      {!isSaving && saveError ? (
+      {!isAdding && addError ? (
         <Alert kind={kinds.DANGER}>
           {translate('AddRootFolderError')}
 
           <ul>
-            {Array.isArray(saveError.responseJSON) ? (
-              saveError.responseJSON.map((e, index) => {
+            {Array.isArray(addError.statusBody) ? (
+              addError.statusBody.map((e, index) => {
                 return <li key={index}>{e.errorMessage}</li>;
               })
             ) : (
-              <li>{JSON.stringify(saveError.responseJSON)}</li>
+              <li>{JSON.stringify(addError.statusBody)}</li>
             )}
           </ul>
         </Alert>
       ) : null}
 
       <div className={styles.addRootFolderButtonContainer}>
-        <Button
-          kind={kinds.PRIMARY}
-          size={sizes.LARGE}
-          onPress={onAddNewRootFolderPress}
-        >
+        <Button kind={kinds.PRIMARY} onPress={onAddNewRootFolderPress}>
           <Icon className={styles.importButtonIcon} name={icons.DRIVE} />
           {translate('AddRootFolder')}
         </Button>

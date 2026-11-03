@@ -15,6 +15,7 @@ namespace Sonarr.Api.V3.Profiles.Quality
         public List<QualityProfileQualityItemResource> Items { get; set; }
         public int MinFormatScore { get; set; }
         public int CutoffFormatScore { get; set; }
+        public int MinUpgradeFormatScore { get; set; }
         public List<ProfileFormatItemResource> FormatItems { get; set; }
     }
 
@@ -24,6 +25,9 @@ namespace Sonarr.Api.V3.Profiles.Quality
         public NzbDrone.Core.Qualities.Quality Quality { get; set; }
         public List<QualityProfileQualityItemResource> Items { get; set; }
         public bool Allowed { get; set; }
+        public double? MinSize { get; set; }
+        public double? MaxSize { get; set; }
+        public double? PreferredSize { get; set; }
 
         public QualityProfileQualityItemResource()
         {
@@ -56,6 +60,7 @@ namespace Sonarr.Api.V3.Profiles.Quality
                 Items = model.Items.ConvertAll(ToResource),
                 MinFormatScore = model.MinFormatScore,
                 CutoffFormatScore = model.CutoffFormatScore,
+                MinUpgradeFormatScore = model.MinUpgradeFormatScore,
                 FormatItems = model.FormatItems.ConvertAll(ToResource)
             };
         }
@@ -73,7 +78,10 @@ namespace Sonarr.Api.V3.Profiles.Quality
                 Name = model.Name,
                 Quality = model.Quality,
                 Items = model.Items.ConvertAll(ToResource),
-                Allowed = model.Allowed
+                Allowed = model.Allowed,
+                MinSize = model.MinSize,
+                MaxSize = model.MaxSize,
+                PreferredSize = model.PreferredSize
             };
         }
 
@@ -103,6 +111,7 @@ namespace Sonarr.Api.V3.Profiles.Quality
                 Items = resource.Items.ConvertAll(ToModel),
                 MinFormatScore = resource.MinFormatScore,
                 CutoffFormatScore = resource.CutoffFormatScore,
+                MinUpgradeFormatScore = resource.MinUpgradeFormatScore,
                 FormatItems = resource.FormatItems.ConvertAll(ToModel)
             };
         }
@@ -120,7 +129,10 @@ namespace Sonarr.Api.V3.Profiles.Quality
                 Name = resource.Name,
                 Quality = resource.Quality != null ? (NzbDrone.Core.Qualities.Quality)resource.Quality.Id : null,
                 Items = resource.Items.ConvertAll(ToModel),
-                Allowed = resource.Allowed
+                Allowed = resource.Allowed,
+                MinSize = resource.MinSize,
+                MaxSize = resource.MaxSize,
+                PreferredSize = resource.PreferredSize
             };
         }
 

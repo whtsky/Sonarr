@@ -186,7 +186,9 @@ namespace NzbDrone.Core.Indexers
 
         protected virtual string GetTitle(XElement item)
         {
-            return item.TryGetValue("title", "Unknown");
+            var title = item.TryGetValue("title", "Unknown");
+
+            return WebUtility.HtmlDecode(title);
         }
 
         protected virtual DateTime GetPublishDate(XElement item)
@@ -262,26 +264,26 @@ namespace NzbDrone.Core.Indexers
         protected virtual RssEnclosure[] GetEnclosures(XElement item)
         {
             var enclosures = item.Elements("enclosure")
-                                 .Select(v =>
-                                 {
-                                     try
-                                     {
-                                         return new RssEnclosure
-                                         {
-                                             Url = v.Attribute("url")?.Value,
-                                             Type = v.Attribute("type")?.Value,
-                                             Length = v.Attribute("length")?.Value?.ParseInt64() ?? 0
-                                         };
-                                     }
-                                     catch (Exception e)
-                                     {
-                                         _logger.Warn(e, "Failed to get enclosure for: {0}", item.Title());
-                                     }
+                .Select(v =>
+                {
+                    try
+                    {
+                        return new RssEnclosure
+                        {
+                            Url = v.Attribute("url")?.Value,
+                            Type = v.Attribute("type")?.Value,
+                            Length = v.Attribute("length")?.Value?.ParseInt64() ?? 0
+                        };
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Warn(ex, "Failed to get enclosure for: {0}", item.Title());
+                    }
 
-                                     return null;
-                                 })
-                                 .Where(v => v != null)
-                                 .ToArray();
+                    return null;
+                })
+                .Where(v => v != null)
+                .ToArray();
 
             return enclosures;
         }

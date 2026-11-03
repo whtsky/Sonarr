@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using FluentValidation;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using NzbDrone.Common.Extensions;
 using NzbDrone.Core.DataAugmentation.Scene;
@@ -9,12 +10,10 @@ using NzbDrone.Core.Datastore.Events;
 using NzbDrone.Core.MediaCover;
 using NzbDrone.Core.MediaFiles;
 using NzbDrone.Core.MediaFiles.Events;
-using NzbDrone.Core.Messaging.Commands;
 using NzbDrone.Core.Messaging.Events;
 using NzbDrone.Core.RootFolders;
 using NzbDrone.Core.SeriesStats;
 using NzbDrone.Core.Tv;
-using NzbDrone.Core.Tv.Commands;
 using NzbDrone.Core.Tv.Events;
 using NzbDrone.Core.Validation;
 using NzbDrone.Core.Validation.Paths;
@@ -34,23 +33,24 @@ namespace Sonarr.Api.V3.Series
                                 IHandle<SeriesEditedEvent>,
                                 IHandle<SeriesDeletedEvent>,
                                 IHandle<SeriesRenamedEvent>,
+                                IHandle<SeriesBulkEditedEvent>,
                                 IHandle<MediaCoversUpdatedEvent>
     {
         private readonly ISeriesService _seriesService;
+        private readonly ISeriesTranslationService _seriesTranslationService;
         private readonly IAddSeriesService _addSeriesService;
         private readonly ISeriesStatisticsService _seriesStatisticsService;
         private readonly ISceneMappingService _sceneMappingService;
         private readonly IMapCoversToLocal _coverMapper;
-        private readonly IManageCommandQueue _commandQueueManager;
         private readonly IRootFolderService _rootFolderService;
 
         public SeriesController(IBroadcastSignalRMessage signalRBroadcaster,
                             ISeriesService seriesService,
+                            ISeriesTranslationService seriesTranslationService,
                             IAddSeriesService addSeriesService,
                             ISeriesStatisticsService seriesStatisticsService,
                             ISceneMappingService sceneMappingService,
                             IMapCoversToLocal coverMapper,
-                            IManageCommandQueue commandQueueManager,
                             IRootFolderService rootFolderService,
                             RootFolderValidator rootFolderValidator,
                             MappedNetworkDriveValidator mappedNetworkDriveValidator,
@@ -59,41 +59,49 @@ namespace Sonarr.Api.V3.Series
                             SeriesAncestorValidator seriesAncestorValidator,
                             SystemFolderValidator systemFolderValidator,
                             QualityProfileExistsValidator qualityProfileExistsValidator,
+                            RootFolderExistsValidator rootFolderExistsValidator,
                             SeriesFolderAsRootFolderValidator seriesFolderAsRootFolderValidator)
             : base(signalRBroadcaster)
         {
             _seriesService = seriesService;
+            _seriesTranslationService = seriesTranslationService;
             _addSeriesService = addSeriesService;
             _seriesStatisticsService = seriesStatisticsService;
             _sceneMappingService = sceneMappingService;
 
             _coverMapper = coverMapper;
-            _commandQueueManager = commandQueueManager;
             _rootFolderService = rootFolderService;
 
-            Http.Validation.RuleBuilderExtensions.ValidId(SharedValidator.RuleFor(s => s.QualityProfileId));
-
-            SharedValidator.RuleFor(s => s.Path)
-                .Cascade(CascadeMode.Stop)
+            SharedValidator.RuleFor(s => s.Path).Cascade(CascadeMode.Stop)
                 .IsValidPath()
-                           .SetValidator(rootFolderValidator)
-                           .SetValidator(mappedNetworkDriveValidator)
-                           .SetValidator(seriesPathValidator)
-                           .SetValidator(seriesAncestorValidator)
-                           .SetValidator(systemFolderValidator)
-                           .When(s => !s.Path.IsNullOrWhiteSpace());
+                .SetValidator(rootFolderValidator)
+                .SetValidator(mappedNetworkDriveValidator)
+                .SetValidator(seriesPathValidator)
+                .SetValidator(seriesAncestorValidator)
+                .SetValidator(systemFolderValidator)
+                .When(s => s.Path.IsNotNullOrWhiteSpace());
 
-            SharedValidator.RuleFor(s => s.QualityProfileId).SetValidator(qualityProfileExistsValidator);
+            PostValidator.RuleFor(s => s.Path).Cascade(CascadeMode.Stop)
+                .NotEmpty()
+                .IsValidPath()
+                .When(s => s.RootFolderPath.IsNullOrWhiteSpace());
+            PostValidator.RuleFor(s => s.RootFolderPath).Cascade(CascadeMode.Stop)
+                .NotEmpty()
+                .IsValidPath()
+                .SetValidator(rootFolderExistsValidator)
+                .SetValidator(seriesFolderAsRootFolderValidator)
+                .When(s => s.Path.IsNullOrWhiteSpace());
 
-            PostValidator.RuleFor(s => s.Path).IsValidPath().When(s => s.RootFolderPath.IsNullOrWhiteSpace());
-            PostValidator.RuleFor(s => s.RootFolderPath)
-                         .IsValidPath()
-                         .SetValidator(seriesFolderAsRootFolderValidator)
-                         .When(s => s.Path.IsNullOrWhiteSpace());
+            PutValidator.RuleFor(s => s.Path).Cascade(CascadeMode.Stop)
+                .NotEmpty()
+                .IsValidPath();
+
+            SharedValidator.RuleFor(s => s.QualityProfileId).Cascade(CascadeMode.Stop)
+                .ValidId()
+                .SetValidator(qualityProfileExistsValidator);
+
             PostValidator.RuleFor(s => s.Title).NotEmpty();
             PostValidator.RuleFor(s => s.TvdbId).GreaterThan(0).SetValidator(seriesExistsValidator);
-
-            PutValidator.RuleFor(s => s.Path).IsValidPath();
         }
 
         [HttpGet]
@@ -102,6 +110,7 @@ namespace Sonarr.Api.V3.Series
         {
             var seriesStats = _seriesStatisticsService.SeriesStatistics();
             var seriesResources = new List<SeriesResource>();
+            var translations = new List<SeriesTranslation>();
 
             if (tvdbId.HasValue)
             {
@@ -112,16 +121,26 @@ namespace Sonarr.Api.V3.Series
                 seriesResources.AddRange(_seriesService.GetAllSeries().Select(s => s.ToResource(includeSeasonImages)));
             }
 
+            if (seriesResources.Count == 1)
+            {
+                translations.AddRange(_seriesTranslationService.GetTranslations(seriesResources.First().Id));
+            }
+            else if (seriesResources.Count > 1)
+            {
+                translations.AddRange(_seriesTranslationService.GetTranslations());
+            }
+
             MapCoversToLocal(seriesResources.ToArray());
             LinkSeriesStatistics(seriesResources, seriesStats.ToDictionary(x => x.SeriesId));
             PopulateAlternateTitles(seriesResources);
+            PopulateTranslations(seriesResources, translations.GroupBy(x => x.SeriesId).ToDictionary(x => x.Key, g => g.ToList()));
             seriesResources.ForEach(LinkRootFolderPath);
 
             return seriesResources;
         }
 
         [NonAction]
-        public override ActionResult<SeriesResource> GetResourceByIdWithErrorHandler(int id)
+        public override Results<Ok<SeriesResource>, NotFound> GetResourceByIdWithErrorHandler(int id)
         {
             return base.GetResourceByIdWithErrorHandler(id);
         }
@@ -158,7 +177,8 @@ namespace Sonarr.Api.V3.Series
 
         [RestPostById]
         [Consumes("application/json")]
-        public ActionResult<SeriesResource> AddSeries(SeriesResource seriesResource)
+        [Produces("application/json")]
+        public ActionResult<SeriesResource> AddSeries([FromBody] SeriesResource seriesResource)
         {
             var series = _addSeriesService.AddSeries(seriesResource.ToModel());
 
@@ -167,29 +187,22 @@ namespace Sonarr.Api.V3.Series
 
         [RestPutById]
         [Consumes("application/json")]
-        public ActionResult<SeriesResource> UpdateSeries(SeriesResource seriesResource, bool moveFiles = false)
+        [Produces("application/json")]
+        public ActionResult<SeriesResource> UpdateSeries([FromBody] SeriesResource seriesResource, [FromQuery] bool moveFiles = false)
         {
             var series = _seriesService.GetSeries(seriesResource.Id);
-
-            if (moveFiles)
-            {
-                var sourcePath = series.Path;
-                var destinationPath = seriesResource.Path;
-
-                _commandQueueManager.Push(new MoveSeriesCommand
-                                          {
-                                              SeriesId = series.Id,
-                                              SourcePath = sourcePath,
-                                              DestinationPath = destinationPath,
-                                              Trigger = CommandTrigger.Manual
-                                          });
-            }
+            var sourcePath = series.Path;
+            var destinationPath = seriesResource.Path;
+            var seasonType = series.SeasonType;
+            var language = series.Language;
 
             var model = seriesResource.ToModel(series);
 
-            _seriesService.UpdateSeries(model);
+            // Don't change the season type for an existing series
+            model.SeasonType = seasonType;
+            model.Language = seriesResource.Language ?? language;
 
-            BroadcastResourceChange(ModelAction.Updated, seriesResource);
+            _seriesService.UpdateSeries(model, sourcePath, destinationPath, moveFiles);
 
             return Accepted(seriesResource.Id);
         }
@@ -211,22 +224,23 @@ namespace Sonarr.Api.V3.Series
             MapCoversToLocal(resource);
             FetchAndLinkSeriesStatistics(resource);
             PopulateAlternateTitles(resource);
+            FetchAndPopulateTranslations(resource);
             LinkRootFolderPath(resource);
 
             return resource;
         }
 
-        private void MapCoversToLocal(params SeriesResource[] series)
+        private void MapCoversToLocal(params IEnumerable<SeriesResource> series)
         {
             foreach (var seriesResource in series)
             {
-                _coverMapper.ConvertToLocalUrls(seriesResource.Id, seriesResource.Images);
+                _coverMapper.ConvertToLocalUrls(seriesResource.Id, seriesResource.Images, seriesResource.Added);
             }
         }
 
         private void FetchAndLinkSeriesStatistics(SeriesResource resource)
         {
-            LinkSeriesStatistics(resource, _seriesStatisticsService.SeriesStatistics(resource.Id));
+            LinkSeriesStatistics(resource, _seriesStatisticsService.SeriesStatistics(resource.Id, resource.QualityProfileId));
         }
 
         private void LinkSeriesStatistics(List<SeriesResource> resources, Dictionary<int, SeriesStatistics> seriesStatistics)
@@ -278,6 +292,29 @@ namespace Sonarr.Api.V3.Series
             resource.AlternateTitles = mappings.ConvertAll(AlternateTitleResourceMapper.ToResource);
         }
 
+        private void FetchAndPopulateTranslations(SeriesResource resource)
+        {
+            var translations = _seriesTranslationService.GetTranslations(resource.Id);
+
+            PopulateTranslations(resource, translations);
+        }
+
+        private void PopulateTranslations(List<SeriesResource> resources, Dictionary<int, List<SeriesTranslation>> translations)
+        {
+            foreach (var resource in resources)
+            {
+                if (translations.TryGetValue(resource.Id, out var seriesTranslations))
+                {
+                    PopulateTranslations(resource, seriesTranslations);
+                }
+            }
+        }
+
+        private void PopulateTranslations(SeriesResource resource, List<SeriesTranslation> translations)
+        {
+            resource.Translations = translations.ToResource();
+        }
+
         private void LinkRootFolderPath(SeriesResource resource)
         {
             resource.RootFolderPath = _rootFolderService.GetBestRootFolderPath(resource.Path);
@@ -319,7 +356,7 @@ namespace Sonarr.Api.V3.Series
         {
             foreach (var series in message.Series)
             {
-                BroadcastResourceChange(ModelAction.Deleted, series.ToResource());
+                BroadcastResourceChange(ModelAction.Deleted, GetSeriesResource(series, false));
             }
         }
 
@@ -327,6 +364,15 @@ namespace Sonarr.Api.V3.Series
         public void Handle(SeriesRenamedEvent message)
         {
             BroadcastResourceChange(ModelAction.Updated, message.Series.Id);
+        }
+
+        [NonAction]
+        public void Handle(SeriesBulkEditedEvent message)
+        {
+            foreach (var series in message.Series)
+            {
+                BroadcastResourceChange(ModelAction.Updated, GetSeriesResource(series, false));
+            }
         }
 
         [NonAction]

@@ -14,10 +14,12 @@ namespace NzbDrone.Core.Tv
         List<Series> FindByTitleInexact(string cleanTitle);
         Series FindByTvdbId(int tvdbId);
         Series FindByTvRageId(int tvRageId);
+        Series FindByImdbId(string imdbId);
         Series FindByPath(string path);
-        List<int> AllSeriesTvdbIds();
+        Dictionary<int, int> AllSeriesTvdbIds();
         Dictionary<int, string> AllSeriesPaths();
         Dictionary<int, List<int>> AllSeriesTags();
+        Dictionary<int, int> AllSeriesQualityProfiles();
     }
 
     public class SeriesRepository : BasicRepository<Series>, ISeriesRepository
@@ -36,28 +38,28 @@ namespace NzbDrone.Core.Tv
         {
             cleanTitle = cleanTitle.ToLowerInvariant();
 
-            var series = Query(s => s.CleanTitle == cleanTitle)
+            var series = Query(s => s.CleanOriginalTitle == cleanTitle || s.CleanTitle == cleanTitle)
                                         .ToList();
 
-            return ReturnSingleSeriesOrThrow(series);
+            return ReturnSingleSeriesOrThrow(PreferCleanTitleMatches(series, cleanTitle));
         }
 
         public Series FindByTitle(string cleanTitle, int year)
         {
             cleanTitle = cleanTitle.ToLowerInvariant();
 
-            var series = Query(s => s.CleanTitle == cleanTitle && s.Year == year).ToList();
+            var series = Query(s => (s.CleanOriginalTitle == cleanTitle || s.CleanTitle == cleanTitle) && s.Year == year).ToList();
 
-            return ReturnSingleSeriesOrThrow(series);
+            return ReturnSingleSeriesOrThrow(PreferCleanTitleMatches(series, cleanTitle));
         }
 
         public List<Series> FindByTitleInexact(string cleanTitle)
         {
-            var builder = Builder().Where($"instr(@cleanTitle, \"Series\".\"CleanTitle\")", new { cleanTitle = cleanTitle });
+            var builder = Builder().Where($"(instr(@cleanTitle, \"Series\".\"CleanOriginalTitle\") OR instr(@cleanTitle, \"Series\".\"CleanTitle\"))", new { cleanTitle = cleanTitle });
 
             if (_database.DatabaseType == DatabaseType.PostgreSQL)
             {
-                builder = Builder().Where($"(strpos(@cleanTitle, \"Series\".\"CleanTitle\") > 0)", new { cleanTitle = cleanTitle });
+                builder = Builder().Where($"((strpos(@cleanTitle, \"Series\".\"CleanOriginalTitle\") > 0) OR (strpos(@cleanTitle, \"Series\".\"CleanTitle\") > 0))", new { cleanTitle = cleanTitle });
             }
 
             return Query(builder).ToList();
@@ -73,17 +75,23 @@ namespace NzbDrone.Core.Tv
             return Query(s => s.TvRageId == tvRageId).SingleOrDefault();
         }
 
+        public Series FindByImdbId(string imdbId)
+        {
+            return Query(s => s.ImdbId == imdbId).SingleOrDefault();
+        }
+
         public Series FindByPath(string path)
         {
             return Query(s => s.Path == path)
                         .FirstOrDefault();
         }
 
-        public List<int> AllSeriesTvdbIds()
+        public Dictionary<int, int> AllSeriesTvdbIds()
         {
             using (var conn = _database.OpenConnection())
             {
-                return conn.Query<int>("SELECT \"TvdbId\" FROM \"Series\"").ToList();
+                var strSql = "SELECT \"Id\" AS Key, \"TvdbId\" AS Value FROM \"Series\"";
+                return conn.Query<KeyValuePair<int, int>>(strSql).ToDictionary(x => x.Key, x => x.Value);
             }
         }
 
@@ -103,6 +111,27 @@ namespace NzbDrone.Core.Tv
                 var strSql = "SELECT \"Id\" AS Key, \"Tags\" AS Value FROM \"Series\" WHERE \"Tags\" IS NOT NULL";
                 return conn.Query<KeyValuePair<int, List<int>>>(strSql).ToDictionary(x => x.Key, x => x.Value);
             }
+        }
+
+        public Dictionary<int, int> AllSeriesQualityProfiles()
+        {
+            using (var conn = _database.OpenConnection())
+            {
+                var strSql = "SELECT \"Id\" AS Key, \"QualityProfileId\" AS Value FROM \"Series\"";
+                return conn.Query<KeyValuePair<int, int>>(strSql).ToDictionary(x => x.Key, x => x.Value);
+            }
+        }
+
+        private List<Series> PreferCleanTitleMatches(List<Series> series, string cleanTitle)
+        {
+            if (series.Count <= 1)
+            {
+                return series;
+            }
+
+            var exactMatches = series.Where(s => s.CleanTitle == cleanTitle).ToList();
+
+            return exactMatches.Count > 0 ? exactMatches : series;
         }
 
         private Series ReturnSingleSeriesOrThrow(List<Series> series)

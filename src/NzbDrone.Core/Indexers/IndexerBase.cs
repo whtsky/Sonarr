@@ -4,9 +4,11 @@ using System.Linq;
 using System.Threading.Tasks;
 using FluentValidation.Results;
 using NLog;
+using NzbDrone.Common.Extensions;
 using NzbDrone.Common.Http;
 using NzbDrone.Core.Configuration;
 using NzbDrone.Core.IndexerSearch.Definitions;
+using NzbDrone.Core.Languages;
 using NzbDrone.Core.Localization;
 using NzbDrone.Core.Parser;
 using NzbDrone.Core.Parser.Model;
@@ -30,6 +32,7 @@ namespace NzbDrone.Core.Indexers
 
         public abstract bool SupportsRss { get; }
         public abstract bool SupportsSearch { get; }
+        public virtual IEnumerable<FailDownloads> DefaultFailDownloads => [];
 
         public IndexerBase(IIndexerStatusService indexerStatusService, IConfigService configService, IParsingService parsingService, Logger logger, ILocalizationService localizationService)
         {
@@ -84,9 +87,16 @@ namespace NzbDrone.Core.Indexers
         protected virtual IList<ReleaseInfo> CleanupReleases(IEnumerable<ReleaseInfo> releases)
         {
             var result = releases.DistinctBy(v => v.Guid).ToList();
+            var settings = Definition.Settings as IIndexerSettings;
 
             result.ForEach(c =>
             {
+                // Use multi languages from setting if ReleaseInfo languages is empty
+                if (c.Languages.Empty() && settings.MultiLanguages.Any() && Parser.Parser.HasMultipleLanguages(c.Title))
+                {
+                    c.Languages = settings.MultiLanguages.Select(i => (Language)i).ToList();
+                }
+
                 c.IndexerId = Definition.Id;
                 c.Indexer = Definition.Name;
                 c.DownloadProtocol = Protocol;

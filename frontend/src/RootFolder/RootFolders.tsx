@@ -1,49 +1,20 @@
-import React, { useEffect } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
+import React from 'react';
 import Alert from 'Components/Alert';
 import LoadingIndicator from 'Components/Loading/LoadingIndicator';
-import Table from 'Components/Table/Table';
-import TableBody from 'Components/Table/TableBody';
 import { kinds } from 'Helpers/Props';
-import { fetchRootFolders } from 'Store/Actions/rootFolderActions';
-import createRootFoldersSelector from 'Store/Selectors/createRootFoldersSelector';
 import translate from 'Utilities/String/translate';
 import RootFolderRow from './RootFolderRow';
+import useRootFolders from './useRootFolders';
+import styles from './RootFolders.module.css';
 
-const rootFolderColumns = [
-  {
-    name: 'path',
-    label: () => translate('Path'),
-    isVisible: true,
-  },
-  {
-    name: 'freeSpace',
-    label: () => translate('FreeSpace'),
-    isVisible: true,
-  },
-  {
-    name: 'unmappedFolders',
-    label: () => translate('UnmappedFolders'),
-    isVisible: true,
-  },
-  {
-    name: 'actions',
-    isVisible: true,
-  },
-];
+interface RootFoldersProps {
+  isSelectable?: boolean;
+}
 
-function RootFolders() {
-  const { isFetching, isPopulated, error, items } = useSelector(
-    createRootFoldersSelector()
-  );
+function RootFolders({ isSelectable = false }: RootFoldersProps) {
+  const { isFetching, isFetched, error, data } = useRootFolders();
 
-  const dispatch = useDispatch();
-
-  useEffect(() => {
-    dispatch(fetchRootFolders());
-  }, [dispatch]);
-
-  if (isFetching && !isPopulated) {
+  if (isFetching && !isFetched) {
     return <LoadingIndicator />;
   }
 
@@ -54,22 +25,15 @@ function RootFolders() {
   }
 
   return (
-    <Table columns={rootFolderColumns}>
-      <TableBody>
-        {items.map((rootFolder) => {
-          return (
-            <RootFolderRow
-              key={rootFolder.id}
-              id={rootFolder.id}
-              path={rootFolder.path}
-              accessible={rootFolder.accessible}
-              freeSpace={rootFolder.freeSpace}
-              unmappedFolders={rootFolder.unmappedFolders}
-            />
-          );
-        })}
-      </TableBody>
-    </Table>
+    <div className={styles.list}>
+      {data.map((rootFolder) => (
+        <RootFolderRow
+          key={rootFolder.id}
+          {...rootFolder}
+          isSelectable={isSelectable}
+        />
+      ))}
+    </div>
   );
 }
 

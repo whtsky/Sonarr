@@ -14,6 +14,7 @@ using NzbDrone.Core.Localization;
 using NzbDrone.Core.MediaFiles.TorrentInfo;
 using NzbDrone.Core.Parser.Model;
 using NzbDrone.Core.RemotePathMappings;
+using NzbDrone.Core.ThingiProvider;
 using NzbDrone.Core.Validation;
 
 namespace NzbDrone.Core.Download.Clients.UTorrent
@@ -104,6 +105,8 @@ namespace NzbDrone.Core.Download.Clients.UTorrent
 
         public override string Name => "uTorrent";
 
+        public override ProviderMessage Message => new(_localizationService.GetLocalizedString("DownloadClientUTorrentProviderMessage"), ProviderMessageType.Warning);
+
         public override IEnumerable<DownloadClientItem> GetItems()
         {
             var torrents = GetTorrents();
@@ -167,6 +170,7 @@ namespace NzbDrone.Core.Download.Clients.UTorrent
 
                 // 'Started' without 'Queued' is when the torrent is 'forced seeding'
                 item.CanMoveFiles = item.CanBeRemoved =
+                    item.DownloadClientInfo.RemoveCompletedDownloads &&
                     !torrent.Status.HasFlag(UTorrentTorrentStatus.Queued) &&
                     !torrent.Status.HasFlag(UTorrentTorrentStatus.Started);
 
@@ -238,7 +242,7 @@ namespace NzbDrone.Core.Download.Clients.UTorrent
 
             var status = new DownloadClientInfo
             {
-                IsLocalhost = Settings.Host == "127.0.0.1" || Settings.Host == "localhost"
+                IsLocalhost = Settings.Host.IsLocalhostAddress()
             };
 
             if (!destDir.IsEmpty)

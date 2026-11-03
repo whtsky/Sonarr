@@ -36,7 +36,7 @@ namespace NzbDrone.Core.Test.IndexerTests.NewznabTests
 
             _singleEpisodeSearchCriteria = new SingleEpisodeSearchCriteria
             {
-                Series = new Tv.Series { TvRageId = 10, TvdbId = 20, TvMazeId = 30, ImdbId = "t40" },
+                Series = new Tv.Series { TvRageId = 10, TvdbId = 20, TvMazeId = 30, ImdbId = "t40", TmdbId = 50 },
                 SceneTitles = new List<string> { "Monkey Island" },
                 SeasonNumber = 1,
                 EpisodeNumber = 2
@@ -44,14 +44,14 @@ namespace NzbDrone.Core.Test.IndexerTests.NewznabTests
 
             _seasonSearchCriteria = new SeasonSearchCriteria
             {
-                Series = new Tv.Series { TvRageId = 10, TvdbId = 20, TvMazeId = 30, ImdbId = "t40" },
+                Series = new Tv.Series { TvRageId = 10, TvdbId = 20, TvMazeId = 30, ImdbId = "t40", TmdbId = 50 },
                 SceneTitles = new List<string> { "Monkey Island" },
                 SeasonNumber = 1,
             };
 
             _animeSearchCriteria = new AnimeEpisodeSearchCriteria()
             {
-                Series = new Tv.Series { TvRageId = 10, TvdbId = 20, TvMazeId = 30, ImdbId = "t40" },
+                Series = new Tv.Series { TvRageId = 10, TvdbId = 20, TvMazeId = 30, ImdbId = "t40", TmdbId = 50 },
                 SceneTitles = new List<string>() { "Monkey+Island" },
                 AbsoluteEpisodeNumber = 100,
                 SeasonNumber = 5,
@@ -60,7 +60,7 @@ namespace NzbDrone.Core.Test.IndexerTests.NewznabTests
 
             _animeSeasonSearchCriteria = new AnimeSeasonSearchCriteria()
             {
-                Series = new Tv.Series { TvRageId = 10, TvdbId = 20, TvMazeId = 30, ImdbId = "t40" },
+                Series = new Tv.Series { TvRageId = 10, TvdbId = 20, TvMazeId = 30, ImdbId = "t40", TmdbId = 50 },
                 SceneTitles = new List<string> { "Monkey Island" },
                 SeasonNumber = 3,
             };
@@ -190,6 +190,49 @@ namespace NzbDrone.Core.Test.IndexerTests.NewznabTests
         }
 
         [Test]
+        public void should_search_season_title_alias_without_the_season_parameter()
+        {
+            Subject.Settings.AnimeStandardFormatSearch = true;
+            _animeSeasonSearchCriteria.SeasonSceneTitles = new List<string> { "Monkey Island" };
+
+            var results = Subject.GetSearchRequests(_animeSeasonSearchCriteria);
+
+            var pages = results.GetAllTiers().Select(t => t.First().Url.FullUri).ToList();
+
+            pages.Should().ContainSingle(p => p.Contains("q="));
+            pages.Should().Contain(p => p.Contains("?t=search&") && p.Contains("q=Monkey%20Island") && !p.Contains("season="));
+        }
+
+        [Test]
+        public void should_search_season_title_alias_when_standard_format_search_is_disabled()
+        {
+            Subject.Settings.AnimeStandardFormatSearch = false;
+            _animeSeasonSearchCriteria.SeasonSceneTitles = new List<string> { "Monkey Island" };
+
+            var results = Subject.GetSearchRequests(_animeSeasonSearchCriteria);
+
+            var pages = results.GetAllTiers().Select(t => t.First().Url.FullUri).ToList();
+
+            pages.Should().ContainSingle();
+            pages.Should().Contain(p => p.Contains("q=Monkey%20Island") && !p.Contains("season="));
+        }
+
+        [Test]
+        public void should_only_search_the_season_title_without_the_season_parameter()
+        {
+            Subject.Settings.AnimeStandardFormatSearch = true;
+            _animeSeasonSearchCriteria.SceneTitles = new List<string> { "Monkey Island", "Monkey Island Revenge" };
+            _animeSeasonSearchCriteria.SeasonSceneTitles = new List<string> { "Monkey Island Revenge" };
+
+            var results = Subject.GetSearchRequests(_animeSeasonSearchCriteria);
+
+            var pages = results.GetAllTiers().Select(t => t.First().Url.FullUri).ToList();
+
+            pages.Should().Contain(p => p.Contains("q=Monkey%20Island&season=3"));
+            pages.Should().Contain(p => p.Contains("q=Monkey%20Island%20Revenge") && !p.Contains("season="));
+        }
+
+        [Test]
         public void should_not_search_by_rid_if_not_supported()
         {
             _capabilities.SupportedTvSearchParameters = new[] { "q", "season", "ep" };
@@ -266,6 +309,19 @@ namespace NzbDrone.Core.Test.IndexerTests.NewznabTests
             var page = results.GetAllTiers().First().First();
 
             page.Url.Query.Should().Contain("imdbid=t40");
+        }
+
+        [Test]
+        public void should_search_by_tmdb_if_supported()
+        {
+            _capabilities.SupportedTvSearchParameters = new[] { "q", "tmdbid", "season", "ep" };
+
+            var results = Subject.GetSearchRequests(_singleEpisodeSearchCriteria);
+            results.GetTier(0).Should().HaveCount(1);
+
+            var page = results.GetAllTiers().First().First();
+
+            page.Url.Query.Should().Contain("tmdbid=50");
         }
 
         [Test]

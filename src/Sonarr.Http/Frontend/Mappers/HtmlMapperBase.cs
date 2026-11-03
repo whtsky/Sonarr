@@ -1,9 +1,11 @@
 using System;
 using System.IO;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Http;
 using NLog;
 using NzbDrone.Common.Disk;
 using NzbDrone.Common.EnvironmentInfo;
+using NzbDrone.Core.Configuration;
 
 namespace Sonarr.Http.Frontend.Mappers
 {
@@ -11,25 +13,33 @@ namespace Sonarr.Http.Frontend.Mappers
     {
         private readonly IDiskProvider _diskProvider;
         private readonly Lazy<ICacheBreakerProvider> _cacheBreakProviderFactory;
-        private static readonly Regex ReplaceRegex = new Regex(@"(?:(?<attribute>href|src)=\"")(?<path>.*?(?<extension>css|js|png|ico|ics|svg|json))(?:\"")(?:\s(?<nohash>data-no-hash))?", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex ReplaceRegex = new Regex(@"(?:(?<attribute>href|src)=\"")(?<path>.*?\.(?<extension>css|js|ts|png|ico|ics|svg|json))(?:\"")(?:\s(?<nohash>data-no-hash))?", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+        private string _urlBase;
         private string _generatedContent;
 
         protected HtmlMapperBase(IDiskProvider diskProvider,
+                                 IConfigFileProvider configFileProvider,
                                  Lazy<ICacheBreakerProvider> cacheBreakProviderFactory,
                                  Logger logger)
             : base(diskProvider, logger)
         {
             _diskProvider = diskProvider;
             _cacheBreakProviderFactory = cacheBreakProviderFactory;
+
+            _urlBase = configFileProvider.UrlBase;
         }
 
-        protected string HtmlPath;
-        protected string UrlBase;
+        protected abstract string HtmlPath { get; }
 
-        protected override Stream GetContentStream(string filePath)
+        protected virtual string ReadHtml()
         {
-            var text = GetHtmlText();
+            return _diskProvider.ReadAllText(HtmlPath);
+        }
+
+        protected override Stream GetContentStream(HttpContext context, string filePath)
+        {
+            var text = GetHtmlText(context);
 
             var stream = new MemoryStream();
             var writer = new StreamWriter(stream);
@@ -39,14 +49,14 @@ namespace Sonarr.Http.Frontend.Mappers
             return stream;
         }
 
-        protected string GetHtmlText()
+        protected virtual string GetHtmlText(HttpContext context)
         {
             if (RuntimeInfo.IsProduction && _generatedContent != null)
             {
                 return _generatedContent;
             }
 
-            var text = _diskProvider.ReadAllText(HtmlPath);
+            var text = ReadHtml();
             var cacheBreakProvider = _cacheBreakProviderFactory.Value;
 
             text = ReplaceRegex.Replace(text, match =>
@@ -62,10 +72,10 @@ namespace Sonarr.Http.Frontend.Mappers
                     url = cacheBreakProvider.AddCacheBreakerToPath(match.Groups["path"].Value);
                 }
 
-                return $"{match.Groups["attribute"].Value}=\"{UrlBase}{url}\"";
+                return $"{match.Groups["attribute"].Value}=\"{_urlBase}{url}\"";
             });
 
-            text = text.Replace("__URL_BASE__", UrlBase);
+            text = text.Replace("__URL_BASE__", _urlBase);
 
             _generatedContent = text;
 

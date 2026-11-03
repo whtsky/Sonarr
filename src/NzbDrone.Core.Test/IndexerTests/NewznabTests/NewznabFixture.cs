@@ -2,7 +2,9 @@ using System;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
+using DryIoc.ImTools;
 using FluentAssertions;
 using Moq;
 using NUnit.Framework;
@@ -48,7 +50,7 @@ namespace NzbDrone.Core.Test.IndexerTests.NewznabTests
 
             Mocker.GetMock<IHttpClient>()
                 .Setup(o => o.ExecuteAsync(It.Is<HttpRequest>(v => v.Method == HttpMethod.Get)))
-                .Returns<HttpRequest>(r => Task.FromResult(new HttpResponse(r, new HttpHeader(), recentFeed)));
+                .ReturnsAsync((HttpRequest r, CancellationToken _) => new HttpResponse(r, new HttpHeader(), recentFeed));
 
             var releases = await Subject.FetchRecent();
 
@@ -74,7 +76,7 @@ namespace NzbDrone.Core.Test.IndexerTests.NewznabTests
 
             Mocker.GetMock<IHttpClient>()
                 .Setup(o => o.ExecuteAsync(It.Is<HttpRequest>(v => v.Method == HttpMethod.Get)))
-                .Returns<HttpRequest>(r => Task.FromResult(new HttpResponse(r, new HttpHeader(), recentFeed)));
+                .ReturnsAsync((HttpRequest r, CancellationToken _) => new HttpResponse(r, new HttpHeader(), recentFeed));
 
             var releases = await Subject.FetchRecent();
 
@@ -114,6 +116,15 @@ namespace NzbDrone.Core.Test.IndexerTests.NewznabTests
         }
 
         [Test]
+        public void should_use_pagesize_over_100_if_reported_in_caps()
+        {
+            _caps.MaxPageSize = 250;
+            _caps.DefaultPageSize = 200;
+
+            Subject.PageSize.Should().Be(200);
+        }
+
+        [Test]
         public async Task should_record_indexer_failure_if_caps_throw()
         {
             var request = new HttpRequest("http://my.indexer.com");
@@ -144,7 +155,7 @@ namespace NzbDrone.Core.Test.IndexerTests.NewznabTests
 
             Mocker.GetMock<IHttpClient>()
                 .Setup(o => o.ExecuteAsync(It.Is<HttpRequest>(v => v.Method == HttpMethod.Get)))
-                .Returns<HttpRequest>(r => Task.FromResult(new HttpResponse(r, new HttpHeader(), recentFeed)));
+                .ReturnsAsync((HttpRequest r, CancellationToken _) => new HttpResponse(r, new HttpHeader(), recentFeed));
 
             var releases = await Subject.FetchRecent();
 
@@ -153,6 +164,32 @@ namespace NzbDrone.Core.Test.IndexerTests.NewznabTests
             releases[0].Languages.Should().BeEquivalentTo(new[] { Language.English, Language.Japanese });
             releases[1].Languages.Should().BeEquivalentTo(new[] { Language.English, Language.Spanish });
             releases[2].Languages.Should().BeEquivalentTo(new[] { Language.French });
+        }
+
+        [TestCase("no custom attributes")]
+        [TestCase("prematch=1 attribute", IndexerFlags.Scene)]
+        [TestCase("haspretime=1 attribute", IndexerFlags.Scene)]
+        [TestCase("prematch=0 attribute")]
+        [TestCase("haspretime=0 attribute")]
+        [TestCase("nuked=1 attribute", IndexerFlags.Nuked)]
+        [TestCase("nuked=0 attribute")]
+        [TestCase("prematch=1 and nuked=1 attributes", IndexerFlags.Scene, IndexerFlags.Nuked)]
+        [TestCase("haspretime=0 and nuked=0 attributes")]
+        [TestCase("subs=eng", IndexerFlags.Subtitles)]
+        [TestCase("subs=''")]
+        public async Task should_parse_indexer_flags(string releaseGuid, params IndexerFlags[] indexerFlags)
+        {
+            var feed = ReadAllText(@"Files/Indexers/Newznab/newznab_indexerflags.xml");
+
+            Mocker.GetMock<IHttpClient>()
+                .Setup(o => o.ExecuteAsync(It.Is<HttpRequest>(v => v.Method == HttpMethod.Get)))
+                .ReturnsAsync((HttpRequest r, CancellationToken _) => new HttpResponse(r, new HttpHeader(), feed));
+
+            var releases = await Subject.FetchRecent();
+
+            var release = releases.Should().ContainSingle(r => r.Guid == releaseGuid).Subject;
+
+            indexerFlags.ForEach(f => release.IndexerFlags.Should().HaveFlag(f));
         }
     }
 }

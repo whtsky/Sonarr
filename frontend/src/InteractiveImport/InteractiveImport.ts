@@ -4,6 +4,7 @@ import ReleaseType from 'InteractiveImport/ReleaseType';
 import Language from 'Language/Language';
 import { QualityModel } from 'Quality/Quality';
 import Series from 'Series/Series';
+import { CustomFormat } from 'Settings/CustomFormats/CustomFormats/useCustomFormats';
 import Rejection from 'typings/Rejection';
 
 export interface InteractiveImportCommandOptions {
@@ -15,6 +16,7 @@ export interface InteractiveImportCommandOptions {
   quality: QualityModel;
   languages: Language[];
   indexerFlags: number;
+  releaseType: ReleaseType;
   downloadId?: string;
   episodeFileId?: number;
 }
@@ -32,11 +34,12 @@ interface InteractiveImport extends ModelBase {
   seasonNumber: number;
   episodes: Episode[];
   qualityWeight: number;
-  customFormats: object[];
+  customFormats: CustomFormat[];
   indexerFlags: number;
   releaseType: ReleaseType;
   rejections: Rejection[];
   episodeFileId?: number;
+  downloadId?: string;
 }
 
 export default InteractiveImport;

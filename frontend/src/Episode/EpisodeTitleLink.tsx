@@ -1,11 +1,14 @@
-import PropTypes from 'prop-types';
 import React, { useCallback, useState } from 'react';
 import Link from 'Components/Link/Link';
 import EpisodeDetailsModal from 'Episode/EpisodeDetailsModal';
+import { EpisodeEntity } from 'Episode/useEpisode';
 import FinaleType from './FinaleType';
-import styles from './EpisodeTitleLink.css';
+import styles from './EpisodeTitleLink.module.css';
 
 interface EpisodeTitleLinkProps {
+  episodeId: number;
+  seriesId: number;
+  episodeEntity: EpisodeEntity;
   episodeTitle: string;
   finaleType?: string;
 }
@@ -37,10 +40,5 @@ function EpisodeTitleLink(props: EpisodeTitleLinkProps) {
     </div>
   );
 }
-
-EpisodeTitleLink.propTypes = {
-  episodeTitle: PropTypes.string.isRequired,
-  finaleType: PropTypes.string,
-};
 
 export default EpisodeTitleLink;

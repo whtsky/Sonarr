@@ -25,10 +25,14 @@ namespace NzbDrone.Common.Extensions
         private static readonly string UPDATE_CLIENT_FOLDER_NAME = "Sonarr.Update" + Path.DirectorySeparatorChar;
         private static readonly string UPDATE_LOG_FOLDER_NAME = "UpdateLogs" + Path.DirectorySeparatorChar;
 
-        private static readonly Regex PARENT_PATH_END_SLASH_REGEX = new Regex(@"(?<!:)\\$", RegexOptions.Compiled);
-
         public static string CleanFilePath(this string path)
         {
+            if (path.IsNotNullOrWhiteSpace())
+            {
+                // Trim trailing spaces before checking if the path is valid so validation doesn't fail for something we can fix.
+                path = path.TrimEnd(' ');
+            }
+
             Ensure.That(path, () => path).IsNotNullOrWhiteSpace();
             Ensure.That(path, () => path).IsValidPath(PathValidationType.AnyOs);
 
@@ -37,10 +41,10 @@ namespace NzbDrone.Common.Extensions
             // UNC
             if (!info.FullName.Contains('/') && info.FullName.StartsWith(@"\\"))
             {
-                return info.FullName.TrimEnd('/', '\\', ' ');
+                return info.FullName.TrimEnd('/', '\\');
             }
 
-            return info.FullName.TrimEnd('/').Trim('\\', ' ');
+            return info.FullName.TrimEnd('/').Trim('\\');
         }
 
         public static bool PathNotEquals(this string firstPath, string secondPath, StringComparison? comparison = null)
@@ -50,6 +54,10 @@ namespace NzbDrone.Common.Extensions
 
         public static bool PathEquals(this string firstPath, string secondPath, StringComparison? comparison = null)
         {
+            // Normalize paths to ensure unicode characters are represented the same way
+            firstPath = firstPath.Normalize();
+            secondPath = secondPath?.Normalize();
+
             if (!comparison.HasValue)
             {
                 comparison = DiskProviderBase.PathStringComparison;
@@ -81,65 +89,50 @@ namespace NzbDrone.Common.Extensions
                 throw new NotParentException("{0} is not a child of {1}", childPath, parentPath);
             }
 
-            return childPath.Substring(parentPath.Length).Trim(Path.DirectorySeparatorChar);
+            return childPath.Substring(parentPath.Length).Trim('\\', '/');
         }
 
         public static string GetParentPath(this string childPath)
         {
-            var cleanPath = childPath.GetCleanPath();
+            var path = new OsPath(childPath).Directory;
 
-            if (cleanPath.IsNullOrWhiteSpace())
-            {
-                return null;
-            }
-
-            return Directory.GetParent(cleanPath)?.FullName;
+            return path == OsPath.Null ? null : path.PathWithoutTrailingSlash;
         }
 
         public static string GetParentName(this string childPath)
         {
-            var cleanPath = childPath.GetCleanPath();
+            var path = new OsPath(childPath).Directory;
 
-            if (cleanPath.IsNullOrWhiteSpace())
-            {
-                return null;
-            }
+            return path == OsPath.Null ? null : path.Name;
+        }
 
-            return Directory.GetParent(cleanPath)?.Name;
+        public static string GetDirectoryName(this string childPath)
+        {
+            var path = new OsPath(childPath);
+
+            return path == OsPath.Null ? null : path.Name;
         }
 
         public static string GetCleanPath(this string path)
         {
-            var cleanPath = OsInfo.IsWindows
-                ? PARENT_PATH_END_SLASH_REGEX.Replace(path, "")
-                : path.TrimEnd(Path.DirectorySeparatorChar);
+            var osPath = new OsPath(path);
 
-            return cleanPath;
+            return osPath == OsPath.Null ? null : osPath.PathWithoutTrailingSlash;
         }
 
         public static bool IsParentPath(this string parentPath, string childPath)
         {
-            if (parentPath != "/" && !parentPath.EndsWith(":\\"))
-            {
-                parentPath = parentPath.TrimEnd(Path.DirectorySeparatorChar);
-            }
+            var parent = new OsPath(parentPath);
+            var child = new OsPath(childPath);
 
-            if (childPath != "/" && !parentPath.EndsWith(":\\"))
+            while (child.Directory != OsPath.Null)
             {
-                childPath = childPath.TrimEnd(Path.DirectorySeparatorChar);
-            }
-
-            var parent = new DirectoryInfo(parentPath);
-            var child = new DirectoryInfo(childPath);
-
-            while (child.Parent != null)
-            {
-                if (child.Parent.FullName.Equals(parent.FullName, DiskProviderBase.PathStringComparison))
+                if (child.Directory.Equals(parent, true))
                 {
                     return true;
                 }
 
-                child = child.Parent;
+                child = child.Directory;
             }
 
             return false;
@@ -147,11 +140,41 @@ namespace NzbDrone.Common.Extensions
 
         private static readonly Regex WindowsPathWithDriveRegex = new Regex(@"^[a-zA-Z]:\\", RegexOptions.Compiled);
 
+        private static readonly Regex WindowsPathTraversalRegex = new Regex(@"\.(?=[\\/]|$)", RegexOptions.Compiled);
+
+        private static readonly Regex PathTraversalRegex = new Regex(@"(?:^|/)\.{1,2}(?=/|$)", RegexOptions.Compiled);
+
         public static bool IsPathValid(this string path, PathValidationType validationType)
         {
             if (string.IsNullOrWhiteSpace(path) || path.ContainsInvalidPathChars())
             {
                 return false;
+            }
+
+            if (path.ContainsPathTraversal())
+            {
+                return false;
+            }
+
+            // Only check for leading or trailing spaces for path when running on Windows.
+            if (OsInfo.IsWindows)
+            {
+                if (path.Trim() != path)
+                {
+                    return false;
+                }
+
+                var directoryInfo = new DirectoryInfo(path);
+
+                while (directoryInfo != null)
+                {
+                    if (directoryInfo.Name.Trim() != directoryInfo.Name)
+                    {
+                        return false;
+                    }
+
+                    directoryInfo = directoryInfo.Parent;
+                }
             }
 
             if (validationType == PathValidationType.AnyOs)
@@ -165,6 +188,21 @@ namespace NzbDrone.Common.Extensions
             }
 
             return IsPathValidForWindows(path);
+        }
+
+        public static bool ContainsPathTraversal(this string path)
+        {
+            if (path.IsNullOrWhiteSpace())
+            {
+                return false;
+            }
+
+            if (OsInfo.IsWindows)
+            {
+                return WindowsPathTraversalRegex.IsMatch(path);
+            }
+
+            return PathTraversalRegex.IsMatch(path);
         }
 
         public static bool ContainsInvalidPathChars(this string text)
@@ -291,6 +329,11 @@ namespace NzbDrone.Common.Extensions
             return processName;
         }
 
+        public static string CleanPath(this string path)
+        {
+            return Path.Join(path.Split(Path.DirectorySeparatorChar).Select(s => s.Trim()).ToArray());
+        }
+
         public static string GetAppDataPath(this IAppFolderInfo appFolderInfo)
         {
             return appFolderInfo.AppDataFolder;
@@ -309,6 +352,13 @@ namespace NzbDrone.Common.Extensions
         public static string GetConfigPath(this IAppFolderInfo appFolderInfo)
         {
             return Path.Combine(GetAppDataPath(appFolderInfo), APP_CONFIG_FILE);
+        }
+
+        public static string GetUiFolder(this IAppFolderInfo appFolderInfo)
+        {
+            return BuildInfo.IsDebug
+                ? Path.GetFullPath(Path.Combine(appFolderInfo.StartUpFolder, "..", "UI"))
+                : Path.Combine(appFolderInfo.StartUpFolder, "UI");
         }
 
         public static string GetMediaCoverPath(this IAppFolderInfo appFolderInfo)

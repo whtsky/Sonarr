@@ -14,6 +14,10 @@ namespace NzbDrone.Core.ImportLists.MyAnimeList
                                        .OverridePropertyName("SignIn")
                                        .WithMessage("Must authenticate with MyAnimeList");
 
+            RuleFor(c => c.MinimumScore)
+                .InclusiveBetween(0, 10)
+                .WithMessage("Must be between 0 and 10");
+
             RuleFor(c => c.ListStatus).Custom((status, context) =>
             {
                 if (!Enum.IsDefined(typeof(MyAnimeListStatus), status))
@@ -24,19 +28,17 @@ namespace NzbDrone.Core.ImportLists.MyAnimeList
         }
     }
 
-    public class MyAnimeListSettings : IImportListSettings
+    public class MyAnimeListSettings : ImportListSettingsBase<MyAnimeListSettings>
     {
-        public string BaseUrl { get; set; }
+        private static readonly MalSettingsValidator Validator = new();
 
-        protected AbstractValidator<MyAnimeListSettings> Validator => new MalSettingsValidator();
-
-        public MyAnimeListSettings()
-        {
-            BaseUrl = "https://api.myanimelist.net/v2";
-        }
+        public override string BaseUrl { get; set; }  = "https://api.myanimelist.net/v2";
 
         [FieldDefinition(0, Label = "ImportListsMyAnimeListSettingsListStatus", Type = FieldType.Select, SelectOptions = typeof(MyAnimeListStatus), HelpText = "ImportListsMyAnimeListSettingsListStatusHelpText")]
         public int ListStatus { get; set; }
+
+        [FieldDefinition(1, Label = "ImportListsMyAnimeListSettingsScore", HelpText = "ImportListsMyAnimeListSettingsScoreHelpText")]
+        public int MinimumScore { get; set; } = 0;
 
         [FieldDefinition(0, Label = "ImportListsSettingsAccessToken", Type = FieldType.Textbox, Hidden = HiddenType.Hidden)]
         public string AccessToken { get; set; }
@@ -50,7 +52,7 @@ namespace NzbDrone.Core.ImportLists.MyAnimeList
         [FieldDefinition(99, Label = "ImportListsMyAnimeListSettingsAuthenticateWithMyAnimeList", Type = FieldType.OAuth)]
         public string SignIn { get; set; }
 
-        public NzbDroneValidationResult Validate()
+        public override NzbDroneValidationResult Validate()
         {
             return new NzbDroneValidationResult(Validator.Validate(this));
         }

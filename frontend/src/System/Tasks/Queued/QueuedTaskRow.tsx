@@ -1,25 +1,27 @@
-import moment from 'moment';
+import moment from 'moment-timezone';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
 import { CommandBody } from 'Commands/Command';
-import Icon from 'Components/Icon';
+import { useCancelCommand } from 'Commands/useCommands';
+import Icon, { IconProps } from 'Components/Icon';
 import IconButton from 'Components/Link/IconButton';
 import ConfirmModal from 'Components/Modal/ConfirmModal';
 import TableRowCell from 'Components/Table/Cells/TableRowCell';
 import TableRow from 'Components/Table/TableRow';
 import useModalOpenState from 'Helpers/Hooks/useModalOpenState';
 import { icons, kinds } from 'Helpers/Props';
-import { cancelCommand } from 'Store/Actions/commandActions';
-import createUISettingsSelector from 'Store/Selectors/createUISettingsSelector';
+import { useUiSettingsValues } from 'Settings/UI/useUiSettings';
 import formatDate from 'Utilities/Date/formatDate';
 import formatDateTime from 'Utilities/Date/formatDateTime';
 import formatTimeSpan from 'Utilities/Date/formatTimeSpan';
 import titleCase from 'Utilities/String/titleCase';
 import translate from 'Utilities/String/translate';
 import QueuedTaskRowNameCell from './QueuedTaskRowNameCell';
-import styles from './QueuedTaskRow.css';
+import styles from './QueuedTaskRow.module.css';
 
-function getStatusIconProps(status: string, message: string | undefined) {
+function getStatusIconProps(
+  status: string,
+  message: string | undefined
+): IconProps {
   const title = titleCase(status);
 
   switch (status) {
@@ -40,7 +42,7 @@ function getStatusIconProps(status: string, message: string | undefined) {
       return {
         name: icons.CHECK,
         kind: kinds.SUCCESS,
-        title: message === 'Completed' ? title : `${title}: ${message}`,
+        title: message == null ? title : `${title}: ${message}`,
       };
 
     case 'failed':
@@ -115,9 +117,9 @@ export default function QueuedTaskRow(props: QueuedTaskRowProps) {
     clientUserAgent,
   } = props;
 
-  const dispatch = useDispatch();
+  const { cancelCommand } = useCancelCommand(id);
   const { longDateFormat, shortDateFormat, showRelativeDates, timeFormat } =
-    useSelector(createUISettingsSelector());
+    useUiSettingsValues();
 
   const updateTimeTimeoutId = useRef<ReturnType<typeof setTimeout> | null>(
     null
@@ -139,8 +141,8 @@ export default function QueuedTaskRow(props: QueuedTaskRowProps) {
   ] = useModalOpenState(false);
 
   const handleCancelPress = useCallback(() => {
-    dispatch(cancelCommand({ id }));
-  }, [id, dispatch]);
+    cancelCommand();
+  }, [cancelCommand]);
 
   useEffect(() => {
     updateTimeTimeoutId.current = setTimeout(() => {
@@ -163,6 +165,7 @@ export default function QueuedTaskRow(props: QueuedTaskRowProps) {
   }, [queued, started, ended, showRelativeDates, shortDateFormat, setTimes]);
 
   const { queuedAt, startedAt, endedAt } = times;
+  const cancelLabel = translate('CancelTaskWithName', { name: commandName });
 
   let triggerIcon = icons.QUICK;
 
@@ -216,7 +219,8 @@ export default function QueuedTaskRow(props: QueuedTaskRowProps) {
       <TableRowCell className={styles.actions}>
         {status === 'queued' && (
           <IconButton
-            title={translate('RemovedFromTaskQueue')}
+            title={cancelLabel}
+            aria-label={cancelLabel}
             name={icons.REMOVE}
             onPress={openCancelConfirmModal}
           />
@@ -226,7 +230,7 @@ export default function QueuedTaskRow(props: QueuedTaskRowProps) {
       <ConfirmModal
         isOpen={isCancelConfirmModalOpen}
         kind={kinds.DANGER}
-        title={translate('Cancel')}
+        title={cancelLabel}
         message={translate('CancelPendingTask')}
         confirmLabel={translate('YesCancel')}
         cancelLabel={translate('NoLeaveIt')}

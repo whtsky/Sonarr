@@ -6,6 +6,7 @@ using FluentAssertions;
 using Moq;
 using NUnit.Framework;
 using NzbDrone.Common.Extensions;
+using NzbDrone.Core.Languages;
 using NzbDrone.Core.MetadataSource.SkyHook;
 using NzbDrone.Core.Test.Framework;
 using NzbDrone.Core.Tv;
@@ -26,7 +27,7 @@ namespace NzbDrone.Core.Test.TvTests
         {
             UseRealHttp();
 
-            _gameOfThrones = Mocker.Resolve<SkyHookProxy>().GetSeriesInfo(121361); // Game of thrones
+            _gameOfThrones = Mocker.Resolve<SkyHookProxy>().GetSeriesInfo(121361, Language.English, SeasonType.Official); // Game of thrones
 
             // Remove specials.
             _gameOfThrones.Item2.RemoveAll(v => v.SeasonNumber == 0);
@@ -395,6 +396,66 @@ namespace NzbDrone.Core.Test.TvTests
             _updatedEpisodes.First().AbsoluteEpisodeNumberAdded.Should().BeTrue();
 
             _insertedEpisodes.Any(e => e.AbsoluteEpisodeNumberAdded).Should().BeFalse();
+        }
+
+        [Test]
+        public void should_monitor_new_episode_if_season_is_monitored()
+        {
+            var series = GetSeries();
+            series.Seasons = new List<Season>();
+            series.Seasons.Add(new Season { SeasonNumber = 1, Monitored = true });
+
+            var episodes = Builder<Episode>.CreateListOfSize(2)
+                .All()
+                .With(e => e.SeasonNumber = 1)
+                .Build()
+                .ToList();
+
+            var existingEpisode = new Episode
+            {
+                SeasonNumber = episodes[0].SeasonNumber,
+                EpisodeNumber = episodes[0].EpisodeNumber,
+                Monitored = true
+            };
+
+            Mocker.GetMock<IEpisodeService>().Setup(c => c.GetEpisodeBySeries(It.IsAny<int>()))
+                .Returns(new List<Episode> { existingEpisode });
+
+            Subject.RefreshEpisodeInfo(series, episodes);
+
+            _updatedEpisodes.Should().HaveCount(1);
+            _insertedEpisodes.Should().HaveCount(1);
+            _insertedEpisodes.Should().OnlyContain(e => e.Monitored == true);
+        }
+
+        [Test]
+        public void should_not_monitor_new_episode_if_season_is_not_monitored()
+        {
+            var series = GetSeries();
+            series.Seasons = new List<Season>();
+            series.Seasons.Add(new Season { SeasonNumber = 1, Monitored = false });
+
+            var episodes = Builder<Episode>.CreateListOfSize(2)
+                .All()
+                .With(e => e.SeasonNumber = 1)
+                .Build()
+                .ToList();
+
+            var existingEpisode = new Episode
+            {
+                SeasonNumber = episodes[0].SeasonNumber,
+                EpisodeNumber = episodes[0].EpisodeNumber,
+                Monitored = true
+            };
+
+            Mocker.GetMock<IEpisodeService>().Setup(c => c.GetEpisodeBySeries(It.IsAny<int>()))
+                .Returns(new List<Episode> { existingEpisode });
+
+            Subject.RefreshEpisodeInfo(series, episodes);
+
+            _updatedEpisodes.Should().HaveCount(1);
+            _insertedEpisodes.Should().HaveCount(1);
+            _insertedEpisodes.Should().OnlyContain(e => e.Monitored == false);
         }
     }
 }

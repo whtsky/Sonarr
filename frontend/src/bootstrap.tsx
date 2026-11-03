@@ -1,17 +1,14 @@
-import { createBrowserHistory } from 'history';
 import React from 'react';
-import { render } from 'react-dom';
-import createAppStore from 'Store/createAppStore';
+import { createRoot } from 'react-dom/client';
 import App from './App/App';
 
 import 'Diag/ConsoleApi';
 
 export async function bootstrap() {
-  const history = createBrowserHistory();
-  const store = createAppStore(history);
+  document.title = window.Sonarr.instanceName;
 
-  render(
-    <App store={store} history={history} />,
-    document.getElementById('root')
-  );
+  const container = document.getElementById('root');
+
+  const root = createRoot(container!);
+  root.render(<App />);
 }

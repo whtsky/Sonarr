@@ -1,0 +1,47 @@
+using NzbDrone.Core.MediaCover;
+using NzbDrone.Core.Tv;
+
+namespace Sonarr.Api.V5.Series;
+
+public class SeasonResource
+{
+    public int SeasonNumber { get; set; }
+    public bool Monitored { get; set; }
+    public string? Title { get; set; }
+    public SeasonStatisticsResource? Statistics { get; set; }
+    public List<MediaCover>? Images { get; set; }
+}
+
+public static class SeasonResourceMapper
+{
+    public static SeasonResource ToResource(this Season model, bool includeImages = false)
+    {
+        return new SeasonResource
+        {
+            SeasonNumber = model.SeasonNumber,
+            Monitored = model.Monitored,
+            Title = model.Title,
+            Images = includeImages ? model.Images : null
+        };
+    }
+
+    public static Season ToModel(this SeasonResource resource)
+    {
+        return new Season
+        {
+            SeasonNumber = resource.SeasonNumber,
+            Monitored = resource.Monitored,
+            Title = resource.Title
+        };
+    }
+
+    public static List<SeasonResource> ToResource(this IEnumerable<Season> models, bool includeImages = false)
+    {
+        return models.Select(s => ToResource(s, includeImages)).ToList();
+    }
+
+    public static List<Season> ToModel(this IEnumerable<SeasonResource> resources)
+    {
+        return resources.Select(ToModel).ToList();
+    }
+}

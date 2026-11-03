@@ -20,29 +20,11 @@ namespace NzbDrone.Core
             return actual;
         }
 
-        public static long Megabytes(this int megabytes)
-        {
-            return Convert.ToInt64(megabytes * 1024L * 1024L);
-        }
-
-        public static long Gigabytes(this int gigabytes)
-        {
-            return Convert.ToInt64(gigabytes * 1024L * 1024L * 1024L);
-        }
-
-        public static long Megabytes(this double megabytes)
-        {
-            return Convert.ToInt64(megabytes * 1024L * 1024L);
-        }
-
-        public static long Gigabytes(this double gigabytes)
-        {
-            return Convert.ToInt64(gigabytes * 1024L * 1024L * 1024L);
-        }
-
         public static long Round(this long number, long level)
         {
-            return Convert.ToInt64(Math.Floor((decimal)number / level) * level);
+            return number < 0
+                ? Convert.ToInt64(Math.Ceiling((decimal)number / level) * level)
+                : Convert.ToInt64(Math.Floor((decimal)number / level) * level);
         }
 
         public static string ToBestDateString(this DateTime dateTime)

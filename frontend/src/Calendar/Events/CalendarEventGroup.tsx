@@ -1,0 +1,284 @@
+import classNames from 'classnames';
+import moment from 'moment-timezone';
+import React, {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { useIsDownloadingEpisodes } from 'Activity/Queue/Details/QueueDetailsProvider';
+import { useCalendarOptions } from 'Calendar/calendarOptionsStore';
+import getStatusStyle from 'Calendar/getStatusStyle';
+import Icon from 'Components/Icon';
+import Link from 'Components/Link/Link';
+import getFinaleTypeName from 'Episode/getFinaleTypeName';
+import { icons, kinds } from 'Helpers/Props';
+import { useSingleSeries } from 'Series/useSeries';
+import { useUiSettingsValues } from 'Settings/UI/useUiSettings';
+import { CalendarItem } from 'typings/Calendar';
+import formatTime from 'Utilities/Date/formatTime';
+import padNumber from 'Utilities/Number/padNumber';
+import translate from 'Utilities/String/translate';
+import CalendarEvent from './CalendarEvent';
+import getCalendarStatusLabel from './getCalendarStatusLabel';
+import styles from './CalendarEventGroup.module.css';
+
+interface CalendarEventGroupProps {
+  episodeIds: number[];
+  seriesId: number;
+  events: CalendarItem[];
+  onEventModalOpenToggle: (isOpen: boolean) => void;
+}
+
+function CalendarEventGroup({
+  episodeIds,
+  seriesId,
+  events,
+  onEventModalOpenToggle,
+}: CalendarEventGroupProps) {
+  const isDownloading = useIsDownloadingEpisodes(episodeIds);
+  const series = useSingleSeries(seriesId)!;
+
+  const { timeFormat } = useUiSettingsValues();
+
+  const { showEpisodeInformation, showFinaleIcon, fullColorEvents } =
+    useCalendarOptions();
+
+  const [isExpanded, setIsExpanded] = useState(false);
+  const expandedContentId = useId();
+  const toggleButtonId = useId();
+  const restoreToggleFocus = useRef(false);
+
+  const firstEpisode = events[0];
+  const lastEpisode = events[events.length - 1];
+  const airDateUtc = firstEpisode.airDateUtc;
+  const startTime = moment(airDateUtc);
+  const endTime = moment(lastEpisode.airDateUtc).add(series.runtime, 'minutes');
+  const seasonNumber = firstEpisode.seasonNumber;
+
+  const { allDownloaded, anyGrabbed, anyMonitored, allAbsoluteEpisodeNumbers } =
+    useMemo(() => {
+      let files = 0;
+      let grabbed = 0;
+      let monitored = 0;
+      let absoluteEpisodeNumbers = 0;
+
+      events.forEach((event) => {
+        if (event.episodeFileId) {
+          files++;
+        }
+
+        if (event.grabbed) {
+          grabbed++;
+        }
+
+        if (series.monitored && event.monitored) {
+          monitored++;
+        }
+
+        if (event.absoluteEpisodeNumber) {
+          absoluteEpisodeNumbers++;
+        }
+      });
+
+      return {
+        allDownloaded: files === events.length,
+        anyGrabbed: grabbed > 0,
+        anyMonitored: monitored > 0,
+        allAbsoluteEpisodeNumbers: absoluteEpisodeNumbers === events.length,
+      };
+    }, [series, events]);
+
+  const anyDownloading = isDownloading || anyGrabbed;
+
+  const statusStyle = getStatusStyle(
+    allDownloaded,
+    anyDownloading,
+    startTime,
+    endTime,
+    anyMonitored
+  );
+  const isMissingAbsoluteNumber =
+    series.seriesType === 'anime' &&
+    seasonNumber > 0 &&
+    !allAbsoluteEpisodeNumbers;
+  const expandLabel = translate('CalendarExpandEpisodeGroup', {
+    count: events.length,
+    series: series.title,
+    season: seasonNumber,
+    status: getCalendarStatusLabel(statusStyle),
+  });
+  const collapseLabel = translate('CalendarCollapseEpisodeGroup', {
+    series: series.title,
+    season: seasonNumber,
+  });
+
+  const handleExpandPress = useCallback(() => {
+    restoreToggleFocus.current = true;
+    setIsExpanded((state) => !state);
+  }, []);
+
+  useEffect(() => {
+    if (restoreToggleFocus.current) {
+      document.getElementById(toggleButtonId)?.focus();
+      restoreToggleFocus.current = false;
+    }
+  }, [isExpanded, toggleButtonId]);
+
+  if (isExpanded) {
+    return (
+      <div>
+        <div id={expandedContentId}>
+          <ul className={styles.expandedEventList}>
+            {events.map((event) => {
+              return (
+                <li key={event.id}>
+                  <CalendarEvent
+                    episodeId={event.id}
+                    {...event}
+                    onEventModalOpenToggle={onEventModalOpenToggle}
+                  />
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+
+        <Link
+          id={toggleButtonId}
+          className={styles.collapseContainer}
+          aria-label={collapseLabel}
+          aria-expanded={true}
+          aria-controls={expandedContentId}
+          onPress={handleExpandPress}
+        >
+          <Icon name={icons.COLLAPSE} aria-hidden={true} />
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={classNames(
+        styles.eventGroup,
+        styles[statusStyle],
+        fullColorEvents && 'fullColor'
+      )}
+    >
+      <div id={expandedContentId} hidden={true} />
+
+      <div className={styles.info}>
+        <div className={styles.seriesTitle}>{series.title}</div>
+
+        <div
+          className={classNames(
+            styles.statusContainer,
+            fullColorEvents && 'fullColor'
+          )}
+        >
+          {isMissingAbsoluteNumber ? (
+            <Icon
+              titleWrapperClassName={styles.statusIcon}
+              name={icons.WARNING}
+              kind={kinds.WARNING}
+              title={translate('EpisodeMissingAbsoluteNumber')}
+            />
+          ) : null}
+
+          {anyDownloading ? (
+            <Icon
+              titleWrapperClassName={styles.statusIcon}
+              name={icons.DOWNLOADING}
+              title={translate('AnEpisodeIsDownloading')}
+            />
+          ) : null}
+
+          {firstEpisode.episodeNumber === 1 && seasonNumber > 0 ? (
+            <Icon
+              titleWrapperClassName={styles.statusIcon}
+              name={icons.PREMIERE}
+              kind={kinds.INFO}
+              title={
+                seasonNumber === 1
+                  ? translate('SeriesPremiere')
+                  : translate('SeasonPremiere')
+              }
+            />
+          ) : null}
+
+          {showFinaleIcon && lastEpisode.finaleType ? (
+            <Icon
+              titleWrapperClassName={styles.statusIcon}
+              name={
+                lastEpisode.finaleType === 'series'
+                  ? icons.FINALE_SERIES
+                  : icons.FINALE_SEASON
+              }
+              kind={
+                lastEpisode.finaleType === 'series'
+                  ? kinds.DANGER
+                  : kinds.WARNING
+              }
+              title={getFinaleTypeName(lastEpisode.finaleType)}
+            />
+          ) : null}
+        </div>
+      </div>
+
+      <div className={styles.airingInfo}>
+        <div className={styles.airTime}>
+          {formatTime(airDateUtc, timeFormat)} -{' '}
+          {formatTime(endTime.toISOString(), timeFormat, {
+            includeMinuteZero: true,
+          })}
+        </div>
+
+        {showEpisodeInformation ? (
+          <div className={styles.episodeInfo}>
+            {seasonNumber}x{padNumber(firstEpisode.episodeNumber, 2)}-
+            {padNumber(lastEpisode.episodeNumber, 2)}
+            {series.seriesType === 'anime' &&
+            firstEpisode.absoluteEpisodeNumber &&
+            lastEpisode.absoluteEpisodeNumber ? (
+              <span className={styles.absoluteEpisodeNumber}>
+                ({firstEpisode.absoluteEpisodeNumber}-
+                {lastEpisode.absoluteEpisodeNumber})
+              </span>
+            ) : null}
+          </div>
+        ) : (
+          <Link
+            id={toggleButtonId}
+            className={styles.expandContainerInline}
+            aria-label={expandLabel}
+            aria-expanded={false}
+            aria-controls={expandedContentId}
+            onPress={handleExpandPress}
+          >
+            <Icon name={icons.EXPAND} aria-hidden={true} />
+          </Link>
+        )}
+      </div>
+
+      {showEpisodeInformation ? (
+        <Link
+          id={toggleButtonId}
+          className={styles.expandContainer}
+          aria-label={expandLabel}
+          aria-expanded={false}
+          aria-controls={expandedContentId}
+          onPress={handleExpandPress}
+        >
+          &nbsp;
+          <Icon name={icons.EXPAND} aria-hidden={true} />
+          &nbsp;
+        </Link>
+      ) : null}
+    </div>
+  );
+}
+
+export default CalendarEventGroup;

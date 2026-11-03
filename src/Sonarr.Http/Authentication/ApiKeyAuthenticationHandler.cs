@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Encodings.Web;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authentication;
@@ -23,16 +25,15 @@ namespace Sonarr.Http.Authentication
 
     public class ApiKeyAuthenticationHandler : AuthenticationHandler<ApiKeyAuthenticationOptions>
     {
-        private readonly string _apiKey;
+        private readonly IConfigFileProvider _configFileProvider;
 
         public ApiKeyAuthenticationHandler(IOptionsMonitor<ApiKeyAuthenticationOptions> options,
             ILoggerFactory logger,
             UrlEncoder encoder,
-            ISystemClock clock,
-            IConfigFileProvider config)
-            : base(options, logger, encoder, clock)
+            IConfigFileProvider configFileProvider)
+            : base(options, logger, encoder)
         {
-            _apiKey = config.ApiKey;
+            _configFileProvider = configFileProvider;
         }
 
         private string ParseApiKey()
@@ -61,7 +62,7 @@ namespace Sonarr.Http.Authentication
                 return Task.FromResult(AuthenticateResult.NoResult());
             }
 
-            if (_apiKey == providedApiKey)
+            if (CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(_configFileProvider.ApiKey), Encoding.UTF8.GetBytes(providedApiKey)))
             {
                 var claims = new List<Claim>
                 {

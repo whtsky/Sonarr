@@ -92,7 +92,10 @@ namespace NzbDrone.Core.Download.Clients.Hadouken
                     item.Status = DownloadItemStatus.Downloading;
                 }
 
-                item.CanMoveFiles = item.CanBeRemoved = torrent.IsFinished && torrent.State == HadoukenTorrentState.Paused;
+                item.CanMoveFiles = item.CanBeRemoved =
+                    item.DownloadClientInfo.RemoveCompletedDownloads &&
+                    torrent.IsFinished &&
+                    torrent.State == HadoukenTorrentState.Paused;
 
                 items.Add(item);
             }
@@ -119,7 +122,7 @@ namespace NzbDrone.Core.Download.Clients.Hadouken
 
             var status = new DownloadClientInfo
             {
-                IsLocalhost = Settings.Host == "127.0.0.1" || Settings.Host == "localhost"
+                IsLocalhost = Settings.Host.IsLocalhostAddress()
             };
 
             if (!destDir.IsEmpty)

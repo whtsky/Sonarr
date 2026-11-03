@@ -1,14 +1,19 @@
 import React, { useCallback } from 'react';
-import { useSelector } from 'react-redux';
+import { useSelect } from 'App/Select/SelectContext';
+import SeriesTagList from 'Components/SeriesTagList';
 import TableRowCell from 'Components/Table/Cells/TableRowCell';
 import TableSelectCell from 'Components/Table/Cells/TableSelectCell';
 import Column from 'Components/Table/Column';
 import TableRow from 'Components/Table/TableRow';
-import TagListConnector from 'Components/TagListConnector';
-import { createQualityProfileSelectorForHook } from 'Store/Selectors/createQualityProfileSelector';
+import tagExistingOptions from 'Settings/ImportLists/ImportLists/tagExistingOptions';
+import {
+  ImportListModel,
+  TagExisting,
+} from 'Settings/ImportLists/ImportLists/useImportLists';
+import { useQualityProfile } from 'Settings/Profiles/Quality/useQualityProfiles';
 import { SelectStateInputProps } from 'typings/props';
 import translate from 'Utilities/String/translate';
-import styles from './ManageImportListsModalRow.css';
+import styles from './ManageImportListsModalRow.module.css';
 
 interface ManageImportListsModalRowProps {
   id: number;
@@ -17,36 +22,37 @@ interface ManageImportListsModalRowProps {
   qualityProfileId: number;
   implementation: string;
   tags: number[];
+  tagExisting: TagExisting;
   enableAutomaticAdd: boolean;
   columns: Column[];
-  isSelected?: boolean;
-  onSelectedChange(result: SelectStateInputProps): void;
 }
 
 function ManageImportListsModalRow(props: ManageImportListsModalRowProps) {
   const {
     id,
-    isSelected,
     name,
     rootFolderPath,
     qualityProfileId,
     implementation,
     enableAutomaticAdd,
     tags,
-    onSelectedChange,
+    tagExisting,
   } = props;
 
-  const qualityProfile = useSelector(
-    createQualityProfileSelectorForHook(qualityProfileId)
-  );
+  const { toggleSelected, useIsSelected } = useSelect<ImportListModel>();
+  const isSelected = useIsSelected(id);
+
+  const qualityProfile = useQualityProfile(qualityProfileId);
 
   const onSelectedChangeWrapper = useCallback(
-    (result: SelectStateInputProps) => {
-      onSelectedChange({
-        ...result,
+    ({ id, value, shiftKey }: SelectStateInputProps) => {
+      toggleSelected({
+        id,
+        isSelected: value,
+        shiftKey,
       });
     },
-    [onSelectedChange]
+    [toggleSelected]
   );
 
   return (
@@ -76,7 +82,11 @@ function ManageImportListsModalRow(props: ManageImportListsModalRowProps) {
       </TableRowCell>
 
       <TableRowCell className={styles.tags}>
-        <TagListConnector tags={tags} />
+        <SeriesTagList tags={tags} />
+      </TableRowCell>
+
+      <TableRowCell className={styles.tagExisting}>
+        {tagExistingOptions.find((o) => o.key === tagExisting)?.value}
       </TableRowCell>
     </TableRow>
   );

@@ -1,36 +1,30 @@
+import classNames from 'classnames';
 import React, { useCallback, useMemo, useState } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
-import TextTruncate from 'react-text-truncate';
-import { REFRESH_SERIES, SERIES_SEARCH } from 'Commands/commandNames';
-import IconButton from 'Components/Link/IconButton';
+import CommandNames from 'Commands/CommandNames';
+import { useExecuteCommand } from 'Commands/useCommands';
 import Link from 'Components/Link/Link';
-import SpinnerIconButton from 'Components/Link/SpinnerIconButton';
-import { icons } from 'Helpers/Props';
+import useMeasure from 'Helpers/Hooks/useMeasure';
 import DeleteSeriesModal from 'Series/Delete/DeleteSeriesModal';
-import EditSeriesModalConnector from 'Series/Edit/EditSeriesModalConnector';
+import EditSeriesModal from 'Series/Edit/EditSeriesModal';
 import SeriesIndexProgressBar from 'Series/Index/ProgressBar/SeriesIndexProgressBar';
 import SeriesIndexPosterSelect from 'Series/Index/Select/SeriesIndexPosterSelect';
-import { Statistics } from 'Series/Series';
+import SeriesIndexActions from 'Series/Index/SeriesIndexActions';
+import { SeriesStatus, Statistics } from 'Series/Series';
+import { useSeriesOverviewOptions } from 'Series/seriesOptionsStore';
 import SeriesPoster from 'Series/SeriesPoster';
-import { executeCommand } from 'Store/Actions/commandActions';
-import dimensions from 'Styles/Variables/dimensions';
-import fonts from 'Styles/Variables/fonts';
+import getSeriesPath from 'Utilities/Series/getSeriesPath';
 import translate from 'Utilities/String/translate';
-import createSeriesIndexItemSelector from '../createSeriesIndexItemSelector';
-import selectOverviewOptions from './selectOverviewOptions';
+import useSeriesIndexItem from '../useSeriesIndexItem';
+import { ROW_BORDER, ROW_VERTICAL_PADDING } from './overviewLayout';
 import SeriesIndexOverviewInfo from './SeriesIndexOverviewInfo';
-import styles from './SeriesIndexOverview.css';
+import styles from './SeriesIndexOverview.module.css';
 
-const columnPadding = parseInt(dimensions.seriesIndexColumnPadding);
-const columnPaddingSmallScreen = parseInt(
-  dimensions.seriesIndexColumnPaddingSmallScreen
-);
-const defaultFontSize = parseInt(fonts.defaultFontSize);
-const lineHeight = parseFloat(fonts.lineHeight);
+// Mirrors .synopsis font-size/line-height in SeriesIndexOverview.css.
+const SYNOPSIS_FONT_SIZE = 13.5;
+const SYNOPSIS_LINE_HEIGHT = 1.6;
 
-// Hardcoded height based on line-height of 32 + bottom margin of 10.
-// Less side-effecty than using react-measure.
-const TITLE_HEIGHT = 42;
+const TITLE_HEIGHT = 38;
+const CHIP_STRIP_HEIGHT = 28;
 
 interface SeriesIndexOverviewProps {
   seriesId: number;
@@ -39,7 +33,21 @@ interface SeriesIndexOverviewProps {
   posterHeight: number;
   rowHeight: number;
   isSelectMode: boolean;
-  isSmallScreen: boolean;
+}
+
+function getStatusBadge(status: SeriesStatus) {
+  switch (status) {
+    case 'deleted':
+      return { label: translate('Deleted'), statusClass: styles.deleted };
+    case 'continuing':
+      return { label: translate('Continuing'), statusClass: styles.continuing };
+    case 'upcoming':
+      return { label: translate('Upcoming'), statusClass: styles.upcoming };
+    case 'ended':
+      return { label: translate('Ended'), statusClass: styles.ended };
+    default:
+      return null;
+  }
 }
 
 function SeriesIndexOverview(props: SeriesIndexOverviewProps) {
@@ -50,58 +58,30 @@ function SeriesIndexOverview(props: SeriesIndexOverviewProps) {
     posterHeight,
     rowHeight,
     isSelectMode,
-    isSmallScreen,
   } = props;
 
   const { series, qualityProfile, isRefreshingSeries, isSearchingSeries } =
-    useSelector(createSeriesIndexItemSelector(props.seriesId));
+    useSeriesIndexItem(seriesId);
 
-  const overviewOptions = useSelector(selectOverviewOptions);
+  const overviewOptions = useSeriesOverviewOptions();
 
-  const {
-    title,
-    monitored,
-    status,
-    path,
-    titleSlug,
-    nextAiring,
-    previousAiring,
-    added,
-    overview,
-    statistics = {} as Statistics,
-    images,
-    network,
-  } = series;
-
-  const {
-    seasonCount = 0,
-    episodeCount = 0,
-    episodeFileCount = 0,
-    totalEpisodeCount = 0,
-    sizeOnDisk = 0,
-  } = statistics;
-
-  const dispatch = useDispatch();
+  const executeCommand = useExecuteCommand();
   const [isEditSeriesModalOpen, setIsEditSeriesModalOpen] = useState(false);
   const [isDeleteSeriesModalOpen, setIsDeleteSeriesModalOpen] = useState(false);
 
   const onRefreshPress = useCallback(() => {
-    dispatch(
-      executeCommand({
-        name: REFRESH_SERIES,
-        seriesId,
-      })
-    );
-  }, [seriesId, dispatch]);
+    executeCommand({
+      name: CommandNames.RefreshSeries,
+      seriesIds: [seriesId],
+    });
+  }, [seriesId, executeCommand]);
 
   const onSearchPress = useCallback(() => {
-    dispatch(
-      executeCommand({
-        name: SERIES_SEARCH,
-        seriesId,
-      })
-    );
-  }, [seriesId, dispatch]);
+    executeCommand({
+      name: CommandNames.SeriesSearch,
+      seriesId,
+    });
+  }, [seriesId, executeCommand]);
 
   const onEditSeriesPress = useCallback(() => {
     setIsEditSeriesModalOpen(true);
@@ -120,20 +100,57 @@ function SeriesIndexOverview(props: SeriesIndexOverviewProps) {
     setIsDeleteSeriesModalOpen(false);
   }, [setIsDeleteSeriesModalOpen]);
 
-  const link = `/series/${titleSlug}`;
+  const contentHeight = useMemo(() => {
+    return rowHeight - (ROW_VERTICAL_PADDING * 2 + ROW_BORDER);
+  }, [rowHeight]);
+
+  const [chipStripRef, chipStripBounds] = useMeasure();
+  const chipStripHeight = chipStripBounds.height || CHIP_STRIP_HEIGHT;
+
+  const synopsisLines = Math.max(
+    1,
+    Math.floor(
+      (contentHeight - TITLE_HEIGHT - chipStripHeight) /
+        (SYNOPSIS_FONT_SIZE * SYNOPSIS_LINE_HEIGHT)
+    )
+  );
+
+  if (!series) {
+    return null;
+  }
+
+  const {
+    title,
+    monitored,
+    status,
+    path,
+    titleSlug,
+    nextAiring,
+    previousAiring,
+    added,
+    overview,
+    statistics = {} as Statistics,
+    images,
+    tags,
+    network,
+  } = series;
+
+  const {
+    seasonCount = 0,
+    episodeCount = 0,
+    episodeFileCount = 0,
+    totalEpisodeCount = 0,
+    sizeOnDisk = 0,
+  } = statistics;
+
+  const link = getSeriesPath({ id: seriesId, titleSlug });
 
   const elementStyle = {
     width: `${posterWidth}px`,
     height: `${posterHeight}px`,
   };
 
-  const contentHeight = useMemo(() => {
-    const padding = isSmallScreen ? columnPaddingSmallScreen : columnPadding;
-
-    return rowHeight - padding;
-  }, [rowHeight, isSmallScreen]);
-
-  const overviewHeight = contentHeight - TITLE_HEIGHT;
+  const statusBadge = getStatusBadge(status);
 
   return (
     <div>
@@ -141,21 +158,32 @@ function SeriesIndexOverview(props: SeriesIndexOverviewProps) {
         <div className={styles.poster}>
           <div className={styles.posterContainer}>
             {isSelectMode ? (
-              <SeriesIndexPosterSelect seriesId={seriesId} />
+              <SeriesIndexPosterSelect
+                seriesId={seriesId}
+                titleSlug={titleSlug}
+              />
             ) : null}
 
-            {status === 'ended' && (
-              <div className={styles.ended} title={translate('Ended')} />
-            )}
+            {statusBadge ? (
+              <div
+                className={classNames(
+                  styles.statusPill,
+                  statusBadge.statusClass
+                )}
+              >
+                <span className={styles.statusLabel}>{statusBadge.label}</span>
+              </div>
+            ) : null}
 
             <Link className={styles.link} style={elementStyle} to={link}>
               <SeriesPoster
-                className={styles.poster}
+                className={styles.posterImage}
                 style={elementStyle}
                 images={images}
                 size={250}
                 lazy={false}
                 overflow={true}
+                title={title}
               />
             </Link>
           </div>
@@ -180,59 +208,54 @@ function SeriesIndexOverview(props: SeriesIndexOverviewProps) {
             </Link>
 
             <div className={styles.actions}>
-              <SpinnerIconButton
-                name={icons.REFRESH}
-                title={translate('RefreshSeries')}
-                isSpinning={isRefreshingSeries}
-                onPress={onRefreshPress}
-              />
-
-              {overviewOptions.showSearchAction ? (
-                <SpinnerIconButton
-                  name={icons.SEARCH}
-                  title={translate('SearchForMonitoredEpisodes')}
-                  isSpinning={isSearchingSeries}
-                  onPress={onSearchPress}
-                />
-              ) : null}
-
-              <IconButton
-                name={icons.EDIT}
-                title={translate('EditSeries')}
-                onPress={onEditSeriesPress}
+              <SeriesIndexActions
+                title={title}
+                className={styles.action}
+                showSearchAction={overviewOptions.showSearchAction}
+                isRefreshingSeries={isRefreshingSeries}
+                isSearchingSeries={isSearchingSeries}
+                onRefreshPress={onRefreshPress}
+                onSearchPress={onSearchPress}
+                onEditSeriesPress={onEditSeriesPress}
               />
             </div>
           </div>
 
-          <div className={styles.details}>
-            <Link className={styles.overview} to={link}>
-              <TextTruncate
-                line={Math.floor(
-                  overviewHeight / (defaultFontSize * lineHeight)
-                )}
-                text={overview}
-              />
-            </Link>
+          <Link
+            className={styles.synopsis}
+            to={link}
+            style={{ WebkitLineClamp: synopsisLines }}
+          >
+            {overview}
+          </Link>
 
-            <SeriesIndexOverviewInfo
-              height={overviewHeight}
-              monitored={monitored}
-              network={network}
-              nextAiring={nextAiring}
-              previousAiring={previousAiring}
-              added={added}
-              seasonCount={seasonCount}
-              qualityProfile={qualityProfile}
-              sizeOnDisk={sizeOnDisk}
-              path={path}
-              sortKey={sortKey}
-              {...overviewOptions}
-            />
-          </div>
+          <SeriesIndexOverviewInfo
+            ref={chipStripRef}
+            monitored={monitored}
+            network={network}
+            nextAiring={nextAiring}
+            previousAiring={previousAiring}
+            added={added}
+            seasonCount={seasonCount}
+            qualityProfile={qualityProfile}
+            sizeOnDisk={sizeOnDisk}
+            path={path}
+            sortKey={sortKey}
+            showNetwork={overviewOptions.showNetwork}
+            showMonitored={overviewOptions.showMonitored}
+            showQualityProfile={overviewOptions.showQualityProfile}
+            showPreviousAiring={overviewOptions.showPreviousAiring}
+            showAdded={overviewOptions.showAdded}
+            showSeasonCount={overviewOptions.showSeasonCount}
+            showPath={overviewOptions.showPath}
+            showSizeOnDisk={overviewOptions.showSizeOnDisk}
+            showTags={overviewOptions.showTags}
+            tags={tags}
+          />
         </div>
       </div>
 
-      <EditSeriesModalConnector
+      <EditSeriesModal
         isOpen={isEditSeriesModalOpen}
         seriesId={seriesId}
         onModalClose={onEditSeriesModalClose}

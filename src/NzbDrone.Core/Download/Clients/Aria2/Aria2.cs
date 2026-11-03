@@ -81,8 +81,8 @@ namespace NzbDrone.Core.Download.Clients.Aria2
             {
                 var firstFile = torrent.Files?.FirstOrDefault();
 
-                // skip metadata download
-                if (firstFile?.Path?.Contains("[METADATA]") == true)
+                // skip metadata download or if the torrent is already removed
+                if (firstFile?.Path?.Contains("[METADATA]") == true || torrent.Status == "removed")
                 {
                     continue;
                 }
@@ -120,19 +120,14 @@ namespace NzbDrone.Core.Download.Clients.Aria2
                     case "complete":
                         status = DownloadItemStatus.Completed;
                         break;
-                    case "removed":
-                        status = DownloadItemStatus.Failed;
-                        break;
                 }
 
                 _logger.Trace($"- aria2 getstatus hash:'{torrent.InfoHash}' gid:'{torrent.Gid}' status:'{status}' total:{totalLength} completed:'{completedLength}'");
 
                 var outputPath = _remotePathMappingService.RemapRemoteToLocal(Settings.Host, new OsPath(GetOutputPath(torrent)));
 
-                yield return new DownloadClientItem
+                var queueItem = new DownloadClientItem
                 {
-                    CanMoveFiles = false,
-                    CanBeRemoved = torrent.Status == "complete",
                     Category = null,
                     DownloadClientInfo = DownloadClientItemClientInfo.FromDownloadClient(this, false),
                     DownloadId = torrent.InfoHash?.ToUpper(),
@@ -141,12 +136,16 @@ namespace NzbDrone.Core.Download.Clients.Aria2
                     OutputPath = outputPath,
                     RemainingSize = totalLength - completedLength,
                     RemainingTime = downloadSpeed == 0 ? (TimeSpan?)null : new TimeSpan(0, 0, (int)((totalLength - completedLength) / downloadSpeed)),
-                    Removed = torrent.Status == "removed",
                     SeedRatio = totalLength > 0 ? (double)uploadedLength / totalLength : 0,
                     Status = status,
                     Title = title,
                     TotalSize = totalLength,
+                    CanMoveFiles = false
                 };
+
+                queueItem.CanBeRemoved = queueItem.DownloadClientInfo.RemoveCompletedDownloads && torrent.Status == "complete";
+
+                yield return queueItem;
             }
         }
 
@@ -195,7 +194,7 @@ namespace NzbDrone.Core.Download.Clients.Aria2
 
             return new DownloadClientInfo
             {
-                IsLocalhost = Settings.Host.Contains("127.0.0.1") || Settings.Host.Contains("localhost"),
+                IsLocalhost = Settings.Host.IsLocalhostAddress(),
                 OutputRootFolders = new List<OsPath> { _remotePathMappingService.RemapRemoteToLocal(Settings.Host, new OsPath(destDir["dir"])) }
             };
         }

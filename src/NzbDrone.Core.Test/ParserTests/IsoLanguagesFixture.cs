@@ -51,5 +51,42 @@ namespace NzbDrone.Core.Test.ParserTests
             var result = IsoLanguages.Find(isoCode);
             result.Language.Should().Be(Language.Czech);
         }
+
+        [TestCase("ur")]
+        [TestCase("urd")]
+        [TestCase("ur-PK")]
+        public void should_return_urdu(string isoCode)
+        {
+            var result = IsoLanguages.Find(isoCode);
+            result.Language.Should().Be(Language.Urdu);
+        }
+
+        [TestCase("rm")]
+        [TestCase("roh")]
+        [TestCase("rm-CH")]
+        public void should_return_romansh(string isoCode)
+        {
+            var result = IsoLanguages.Find(isoCode);
+            result.Language.Should().Be(Language.Romansh);
+        }
+
+        [TestCase("ka")]
+        [TestCase("geo")]
+        [TestCase("kat")]
+        [TestCase("ka-GE")]
+        public void should_return_georgian(string isoCode)
+        {
+            var result = IsoLanguages.Find(isoCode);
+            result.Language.Should().Be(Language.Georgian);
+        }
+
+        [TestCase("ga")]
+        [TestCase("gle")]
+        [TestCase("ga-IE")]
+        public void should_return_irish(string isoCode)
+        {
+            var result = IsoLanguages.Find(isoCode);
+            result.Language.Should().Be(Language.Irish);
+        }
     }
 }

@@ -1,0 +1,36 @@
+import moment from 'moment';
+import React, { Fragment } from 'react';
+import useCalendar from 'Calendar/useCalendar';
+import { useUiSettingsValues } from 'Settings/UI/useUiSettings';
+import AgendaEvent from './AgendaEvent';
+import styles from './Agenda.module.css';
+
+function Agenda() {
+  const { data } = useCalendar();
+  const { longDateFormat } = useUiSettingsValues();
+
+  return (
+    <div className={styles.agenda}>
+      {data.map((item, index) => {
+        const date = moment(item.airDateUtc);
+        const previousDate =
+          index > 0 ? moment(data[index - 1].airDateUtc) : null;
+        const showHeader = !previousDate || !date.isSame(previousDate, 'day');
+
+        return (
+          <Fragment key={item.id}>
+            {showHeader ? (
+              <div className={styles.dayHeader}>
+                {date.format(longDateFormat)}
+              </div>
+            ) : null}
+
+            <AgendaEvent {...item} />
+          </Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
+export default Agenda;

@@ -1,0 +1,28 @@
+import React from 'react';
+import Modal from 'Components/Modal/Modal';
+import { sizes } from 'Helpers/Props';
+import AddDownloadClientModalContent, {
+  AddDownloadClientModalContentProps,
+} from './AddDownloadClientModalContent';
+
+interface AddDownloadClientModalProps
+  extends AddDownloadClientModalContentProps {
+  isOpen: boolean;
+}
+
+function AddDownloadClientModal({
+  isOpen,
+  onDownloadClientSelect,
+  onModalClose,
+}: AddDownloadClientModalProps) {
+  return (
+    <Modal size={sizes.MEDIUM} isOpen={isOpen} onModalClose={onModalClose}>
+      <AddDownloadClientModalContent
+        onDownloadClientSelect={onDownloadClientSelect}
+        onModalClose={onModalClose}
+      />
+    </Modal>
+  );
+}
+
+export default AddDownloadClientModal;

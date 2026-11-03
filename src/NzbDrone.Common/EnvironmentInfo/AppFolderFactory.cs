@@ -11,7 +11,9 @@ namespace NzbDrone.Common.EnvironmentInfo
     public interface IAppFolderFactory
     {
         void Register();
-        void SetPermissions();
+        bool SetPermissions();
+        bool SetServicePermissions();
+        void RemoveEveryonePermissions();
     }
 
     public class AppFolderFactory : IAppFolderFactory
@@ -46,11 +48,6 @@ namespace NzbDrone.Common.EnvironmentInfo
                 throw new SonarrStartupException("Cannot create AppFolder, Access to the path {0} is denied", _appFolderInfo.AppDataFolder);
             }
 
-            if (OsInfo.IsWindows)
-            {
-                SetPermissions();
-            }
-
             if (!_diskProvider.FolderWritable(_appFolderInfo.AppDataFolder))
             {
                 throw new SonarrStartupException("AppFolder {0} is not writable", _appFolderInfo.AppDataFolder);
@@ -59,15 +56,47 @@ namespace NzbDrone.Common.EnvironmentInfo
             InitializeMonoApplicationData();
         }
 
-        public void SetPermissions()
+        public bool SetPermissions()
         {
             try
             {
-                _diskProvider.SetEveryonePermissions(_appFolderInfo.AppDataFolder);
+                _diskProvider.SetCurrentUserPermissions(_appFolderInfo.AppDataFolder);
+
+                return true;
             }
             catch (Exception ex)
             {
                 _logger.Warn(ex, "Couldn't set app folder permission");
+
+                return false;
+            }
+        }
+
+        public bool SetServicePermissions()
+        {
+            try
+            {
+                _diskProvider.SetServiceAccountPermissions(_appFolderInfo.AppDataFolder);
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn(ex, "Couldn't set app folder permission for the service account");
+
+                return false;
+            }
+        }
+
+        public void RemoveEveryonePermissions()
+        {
+            try
+            {
+                _diskProvider.RemoveEveryonePermissions(_appFolderInfo.AppDataFolder);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn(ex, "Couldn't remove everyone permissions from the app folder");
             }
         }
 
@@ -75,6 +104,17 @@ namespace NzbDrone.Common.EnvironmentInfo
         {
             try
             {
+                if (OsInfo.IsOsx)
+                {
+                    var userAppDataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify), ".config", "Sonarr");
+
+                    if (_diskProvider.FolderExists(userAppDataFolder) && !_diskProvider.FileExists(_appFolderInfo.GetConfigPath()))
+                    {
+                        _diskTransferService.MirrorFolder(userAppDataFolder, _appFolderInfo.AppDataFolder);
+                        _diskProvider.DeleteFolder(userAppDataFolder, true);
+                    }
+                }
+
                 var oldDbFile = Path.Combine(_appFolderInfo.AppDataFolder, "nzbdrone.db");
 
                 if (_startupContext.Args.ContainsKey(StartupContext.APPDATA))
@@ -134,7 +174,7 @@ namespace NzbDrone.Common.EnvironmentInfo
             catch (Exception ex)
             {
                 _logger.Debug(ex, ex.Message);
-                throw new SonarrStartupException("Unable to migrate AppData folder from {0} to {1}. Migrate manually", _appFolderInfo.LegacyAppDataFolder, _appFolderInfo.AppDataFolder);
+                throw new SonarrStartupException(ex, "Unable to migrate AppData folder from {0} to {1}. Migrate manually", _appFolderInfo.LegacyAppDataFolder, _appFolderInfo.AppDataFolder);
             }
         }
 
@@ -211,7 +251,7 @@ namespace NzbDrone.Common.EnvironmentInfo
 
         private void RemovePidFile()
         {
-            if (OsInfo.IsNotWindows)
+            if (OsInfo.IsNotWindows && _diskProvider.FolderExists(_appFolderInfo.AppDataFolder))
             {
                 _diskProvider.DeleteFile(Path.Combine(_appFolderInfo.AppDataFolder, "sonarr.pid"));
             }

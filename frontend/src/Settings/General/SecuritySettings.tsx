@@ -1,0 +1,289 @@
+import React, { FocusEvent, useCallback, useState } from 'react';
+import CommandNames from 'Commands/CommandNames';
+import { useExecuteCommand } from 'Commands/useCommands';
+import FieldSet from 'Components/FieldSet';
+import FormInput from 'Components/Form/FormInput';
+import FormInputButton from 'Components/Form/FormInputButton';
+import FormInputHelpText from 'Components/Form/FormInputHelpText';
+import FormLabel from 'Components/Form/FormLabel';
+import FormRow from 'Components/Form/FormRow';
+import { EnhancedSelectInputValue } from 'Components/Form/Select/EnhancedSelectInput';
+import Icon from 'Components/Icon';
+import ClipboardButton from 'Components/Link/ClipboardButton';
+import ConfirmModal from 'Components/Modal/ConfirmModal';
+import { icons, inputTypes, kinds } from 'Helpers/Props';
+import { InputChanged } from 'typings/inputs';
+import { PendingSection } from 'typings/pending';
+import translate from 'Utilities/String/translate';
+import AuthenticationMethodSettings from './AuthenticationMethodSettings';
+import { GeneralSettingsModel } from './useGeneralSettings';
+
+export const authenticationMethodOptions: EnhancedSelectInputValue<string>[] = [
+  {
+    key: 'none',
+    get value() {
+      return translate('None');
+    },
+    isDisabled: true,
+  },
+  {
+    key: 'external',
+    get value() {
+      return translate('External');
+    },
+    isHidden: true,
+  },
+  {
+    key: 'oidc',
+    get value() {
+      return translate('Oidc');
+    },
+  },
+  {
+    key: 'basic',
+    get value() {
+      return translate('AuthBasic');
+    },
+    isDisabled: true,
+    isHidden: true,
+  },
+  {
+    key: 'forms',
+    get value() {
+      return translate('AuthForm');
+    },
+  },
+];
+
+export const authenticationRequiredOptions: EnhancedSelectInputValue<string>[] =
+  [
+    {
+      key: 'enabled',
+      get value() {
+        return translate('Enabled');
+      },
+    },
+    {
+      key: 'disabledForLocalAddresses',
+      get value() {
+        return translate('DisabledForLocalAddresses');
+      },
+    },
+    {
+      key: 'disabledForLocalhost',
+      get value() {
+        return translate('DisabledForLocalhost');
+      },
+    },
+  ];
+
+const certificateValidationOptions: EnhancedSelectInputValue<string>[] = [
+  {
+    key: 'enabled',
+    get value() {
+      return translate('Enabled');
+    },
+  },
+  {
+    key: 'disabledForLocalAddresses',
+    get value() {
+      return translate('DisabledForLocalAddresses');
+    },
+  },
+  {
+    key: 'disabled',
+    get value() {
+      return translate('Disabled');
+    },
+  },
+];
+
+interface SecuritySettingsProps {
+  authenticationMethod: PendingSection<GeneralSettingsModel>['authenticationMethod'];
+  authenticationRequired: PendingSection<GeneralSettingsModel>['authenticationRequired'];
+  username: PendingSection<GeneralSettingsModel>['username'];
+  password: PendingSection<GeneralSettingsModel>['password'];
+  passwordConfirmation: PendingSection<GeneralSettingsModel>['passwordConfirmation'];
+  oidcAuthority: PendingSection<GeneralSettingsModel>['oidcAuthority'];
+  oidcClientId: PendingSection<GeneralSettingsModel>['oidcClientId'];
+  oidcClientSecret: PendingSection<GeneralSettingsModel>['oidcClientSecret'];
+  oidcUserIdentifier: PendingSection<GeneralSettingsModel>['oidcUserIdentifier'];
+  oidcScopes: PendingSection<GeneralSettingsModel>['oidcScopes'];
+  apiKey: PendingSection<GeneralSettingsModel>['apiKey'];
+  certificateValidation: PendingSection<GeneralSettingsModel>['certificateValidation'];
+  trustedNetworks: PendingSection<GeneralSettingsModel>['trustedNetworks'];
+  isResettingApiKey: boolean;
+  onInputChange: (change: InputChanged) => void;
+}
+
+function SecuritySettings({
+  authenticationMethod,
+  authenticationRequired,
+  username,
+  password,
+  passwordConfirmation,
+  oidcAuthority,
+  oidcClientId,
+  oidcClientSecret,
+  oidcUserIdentifier,
+  oidcScopes,
+  apiKey,
+  certificateValidation,
+  trustedNetworks,
+  isResettingApiKey,
+  onInputChange,
+}: SecuritySettingsProps) {
+  const executeCommand = useExecuteCommand();
+
+  const [isConfirmApiKeyResetModalOpen, setIsConfirmApiKeyResetModalOpen] =
+    useState(false);
+
+  const handleApikeyFocus = useCallback(
+    (event: FocusEvent<HTMLInputElement, Element>) => {
+      event.target.select();
+    },
+    []
+  );
+
+  const handleResetApiKeyPress = useCallback(() => {
+    setIsConfirmApiKeyResetModalOpen(true);
+  }, []);
+
+  const handleConfirmResetApiKey = useCallback(() => {
+    setIsConfirmApiKeyResetModalOpen(false);
+
+    executeCommand({ name: CommandNames.ResetApiKey });
+  }, [executeCommand]);
+
+  const handleCloseResetApiKeyModal = useCallback(() => {
+    setIsConfirmApiKeyResetModalOpen(false);
+  }, []);
+
+  // createCommandExecutingSelector(CommandNames.RESET_API_KEY),
+
+  const authenticationEnabled =
+    authenticationMethod && authenticationMethod.value !== 'none';
+
+  return (
+    <FieldSet
+      legend={translate('Security')}
+      caption={translate('SecurityCaption')}
+    >
+      <FormRow>
+        <FormLabel>{translate('Authentication')}</FormLabel>
+        <FormInputHelpText text={translate('AuthenticationMethodHelpText')} />
+        <FormInputHelpText
+          text={translate('AuthenticationRequiredWarning')}
+          isWarning={true}
+        />
+        <FormInput
+          type={inputTypes.SELECT}
+          name="authenticationMethod"
+          values={authenticationMethodOptions}
+          onChange={onInputChange}
+          {...authenticationMethod}
+        />
+      </FormRow>
+      {authenticationEnabled ? (
+        <FormRow>
+          <FormLabel>{translate('AuthenticationRequired')}</FormLabel>
+          <FormInputHelpText
+            text={translate('AuthenticationRequiredHelpText')}
+          />
+          <FormInput
+            type={inputTypes.SELECT}
+            name="authenticationRequired"
+            values={authenticationRequiredOptions}
+            onChange={onInputChange}
+            {...authenticationRequired}
+          />
+        </FormRow>
+      ) : null}
+
+      <AuthenticationMethodSettings
+        authenticationMethod={authenticationMethod}
+        username={username}
+        password={password}
+        passwordConfirmation={passwordConfirmation}
+        oidcAuthority={oidcAuthority}
+        oidcClientId={oidcClientId}
+        oidcClientSecret={oidcClientSecret}
+        oidcUserIdentifier={oidcUserIdentifier}
+        oidcScopes={oidcScopes}
+        onInputChange={onInputChange}
+      />
+
+      <FormRow>
+        <FormLabel>{translate('ApiKey')}</FormLabel>
+        <FormInputHelpText
+          text={translate('BrowserReloadRequired')}
+          isWarning={true}
+        />
+        <FormInput
+          type={inputTypes.TEXT}
+          name="apiKey"
+          readOnly={true}
+          buttons={[
+            <ClipboardButton
+              key="copy"
+              value={apiKey.value}
+              kind={kinds.DEFAULT}
+            />,
+
+            <FormInputButton
+              key="reset"
+              kind={kinds.DANGER}
+              title={translate('ResetAPIKey')}
+              aria-label={translate('ResetAPIKey')}
+              onPress={handleResetApiKeyPress}
+            >
+              <Icon name={icons.REFRESH} isSpinning={isResettingApiKey} />
+            </FormInputButton>,
+          ]}
+          onChange={onInputChange}
+          onFocus={handleApikeyFocus}
+          {...apiKey}
+        />
+      </FormRow>
+      <FormRow>
+        <FormLabel>{translate('CertificateValidation')}</FormLabel>
+        <FormInputHelpText text={translate('CertificateValidationHelpText')} />
+        <FormInput
+          type={inputTypes.SELECT}
+          name="certificateValidation"
+          values={certificateValidationOptions}
+          onChange={onInputChange}
+          {...certificateValidation}
+        />
+      </FormRow>
+      <FormRow>
+        <FormLabel>{translate('TrustedNetworks')}</FormLabel>
+        <FormInputHelpText
+          text={translate('TrustedNetworksHelpText')}
+          link="https://wiki.servarr.com/sonarr/settings#security"
+        />
+        <FormInputHelpText
+          text={translate('RestartRequiredHelpTextWarning')}
+          isWarning={true}
+        />
+        <FormInput
+          type={inputTypes.TEXT}
+          name="trustedNetworks"
+          onChange={onInputChange}
+          {...trustedNetworks}
+        />
+      </FormRow>
+      <ConfirmModal
+        isOpen={isConfirmApiKeyResetModalOpen}
+        kind={kinds.DANGER}
+        title={translate('ResetAPIKey')}
+        message={translate('ResetAPIKeyMessageText')}
+        confirmLabel={translate('Reset')}
+        onConfirm={handleConfirmResetApiKey}
+        onCancel={handleCloseResetApiKeyModal}
+      />
+    </FieldSet>
+  );
+}
+
+export default SecuritySettings;

@@ -1,31 +1,40 @@
 import React from 'react';
+import HeartRating from 'Components/HeartRating';
+import useCountryName from 'Internationalization/useCountryName';
 import Language from 'Language/Language';
-import QualityProfile from 'typings/QualityProfile';
+import SeriesIndexTags from 'Series/Index/SeriesIndexTags';
+import { Ratings } from 'Series/Series';
+import { QualityProfileModel } from 'Settings/Profiles/Quality/useQualityProfiles';
 import formatDateTime from 'Utilities/Date/formatDateTime';
 import getRelativeDate from 'Utilities/Date/getRelativeDate';
 import formatBytes from 'Utilities/Number/formatBytes';
 import translate from 'Utilities/String/translate';
-import styles from './SeriesIndexPosterInfo.css';
+import styles from './SeriesIndexPosterInfo.module.css';
 
 interface SeriesIndexPosterInfoProps {
+  originalCountry?: string;
   originalLanguage?: Language;
   network?: string;
   showQualityProfile: boolean;
-  qualityProfile?: QualityProfile;
+  qualityProfile?: QualityProfileModel;
   previousAiring?: string;
   added?: string;
   seasonCount: number;
   path: string;
   sizeOnDisk?: number;
+  ratings: Ratings;
+  tags: number[];
   sortKey: string;
   showRelativeDates: boolean;
   shortDateFormat: string;
   longDateFormat: string;
   timeFormat: string;
+  showTags: boolean;
 }
 
 function SeriesIndexPosterInfo(props: SeriesIndexPosterInfoProps) {
   const {
+    originalCountry,
     originalLanguage,
     network,
     qualityProfile,
@@ -34,18 +43,31 @@ function SeriesIndexPosterInfo(props: SeriesIndexPosterInfoProps) {
     added,
     seasonCount,
     path,
-    sizeOnDisk,
+    sizeOnDisk = 0,
+    ratings,
+    tags,
     sortKey,
     showRelativeDates,
     shortDateFormat,
     longDateFormat,
     timeFormat,
+    showTags,
   } = props;
+
+  const originalCountryName = useCountryName(originalCountry);
 
   if (sortKey === 'network' && network) {
     return (
       <div className={styles.info} title={translate('Network')}>
         {network}
+      </div>
+    );
+  }
+
+  if (sortKey === 'originalCountry' && !!originalCountryName) {
+    return (
+      <div className={styles.info} title={translate('OriginalCountry')}>
+        {originalCountryName}
       </div>
     );
   }
@@ -80,7 +102,10 @@ function SeriesIndexPosterInfo(props: SeriesIndexPosterInfoProps) {
           timeFormat
         )}`}
       >
-        {getRelativeDate(previousAiring, shortDateFormat, showRelativeDates, {
+        {getRelativeDate({
+          date: previousAiring,
+          shortDateFormat,
+          showRelativeDates,
           timeFormat,
           timeForToday: true,
         })}
@@ -89,15 +114,13 @@ function SeriesIndexPosterInfo(props: SeriesIndexPosterInfoProps) {
   }
 
   if (sortKey === 'added' && added) {
-    const addedDate = getRelativeDate(
-      added,
+    const addedDate = getRelativeDate({
+      date: added,
       shortDateFormat,
       showRelativeDates,
-      {
-        timeFormat,
-        timeForToday: false,
-      }
-    );
+      timeFormat,
+      timeForToday: false,
+    });
 
     return (
       <div
@@ -121,6 +144,14 @@ function SeriesIndexPosterInfo(props: SeriesIndexPosterInfoProps) {
     return <div className={styles.info}>{seasons}</div>;
   }
 
+  if (!showTags && sortKey === 'tags' && tags.length) {
+    return (
+      <div className={styles.tags}>
+        <SeriesIndexTags tags={tags} />
+      </div>
+    );
+  }
+
   if (sortKey === 'path') {
     return (
       <div className={styles.info} title={translate('Path')}>
@@ -133,6 +164,14 @@ function SeriesIndexPosterInfo(props: SeriesIndexPosterInfoProps) {
     return (
       <div className={styles.info} title={translate('SizeOnDisk')}>
         {formatBytes(sizeOnDisk)}
+      </div>
+    );
+  }
+
+  if (sortKey === 'ratings' && ratings.value) {
+    return (
+      <div className={styles.info} title={translate('Rating')}>
+        <HeartRating rating={ratings.value} votes={ratings.votes} />
       </div>
     );
   }

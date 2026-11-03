@@ -23,7 +23,6 @@ namespace NzbDrone.Core.Download
         public bool IsEncrypted { get; set; }
         public bool CanMoveFiles { get; set; }
         public bool CanBeRemoved { get; set; }
-        public bool Removed { get; set; }
 
         public DownloadClientItem Clone()
         {
@@ -37,6 +36,7 @@ namespace NzbDrone.Core.Download
         public string Type { get; set; }
         public int Id { get; set; }
         public string Name { get; set; }
+        public bool RemoveCompletedDownloads { get; set; }
         public bool HasPostImportCategory { get; set; }
 
         public static DownloadClientItemClientInfo FromDownloadClient<TSettings>(
@@ -49,6 +49,7 @@ namespace NzbDrone.Core.Download
                 Type = downloadClient.Name,
                 Id = downloadClient.Definition.Id,
                 Name = downloadClient.Definition.Name,
+                RemoveCompletedDownloads = downloadClient.Definition is DownloadClientDefinition { RemoveCompletedDownloads: true },
                 HasPostImportCategory = hasPostImportCategory
             };
         }

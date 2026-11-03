@@ -1,10 +1,12 @@
 using System.Collections.Generic;
 using FluentAssertions;
+using Microsoft.Extensions.Options;
 using Moq;
 using NUnit.Framework;
 using NzbDrone.Common.Disk;
 using NzbDrone.Common.EnvironmentInfo;
 using NzbDrone.Common.Extensions;
+using NzbDrone.Common.Options;
 using NzbDrone.Core.Authentication;
 using NzbDrone.Core.Configuration;
 using NzbDrone.Test.Common;
@@ -22,6 +24,10 @@ namespace NzbDrone.Common.Test
         public void SetUp()
         {
             WithTempAsAppPath();
+
+            Mocker.GetMock<IAppFolderInfo>()
+                .SetupGet(c => c.StartUpFolder)
+                .Returns(VirtualPath);
 
             _configFilePath = Mocker.Resolve<IAppFolderInfo>().GetConfigPath();
 
@@ -43,6 +49,26 @@ namespace NzbDrone.Common.Test
             Mocker.GetMock<IDiskProvider>()
                 .Setup(v => v.WriteAllText(configFile, It.IsAny<string>()))
                 .Callback<string, string>((p, t) => _configFileContents = t);
+
+            Mocker.GetMock<IOptions<AuthOptions>>()
+                .Setup(v => v.Value)
+                .Returns(new AuthOptions());
+
+            Mocker.GetMock<IOptions<AppOptions>>()
+                .Setup(v => v.Value)
+                .Returns(new AppOptions());
+
+            Mocker.GetMock<IOptions<ServerOptions>>()
+                .Setup(v => v.Value)
+                .Returns(new ServerOptions());
+
+            Mocker.GetMock<IOptions<LogOptions>>()
+                .Setup(v => v.Value)
+                .Returns(new LogOptions());
+
+            Mocker.GetMock<IOptions<UpdateOptions>>()
+                .Setup(v => v.Value)
+                .Returns(new UpdateOptions());
         }
 
         [Test]
@@ -132,11 +158,44 @@ namespace NzbDrone.Common.Test
         }
 
         [Test]
-        public void GetAuthenticationType_No_Existing_Value()
+        public void should_default_to_forms_authentication_when_no_existing_value()
         {
             var result = Subject.AuthenticationMethod;
 
+            result.Should().Be(AuthenticationType.Forms);
+        }
+
+        [Test]
+        public void should_coerce_none_in_config_file_to_forms()
+        {
+            Subject.SetValue("AuthenticationMethod", AuthenticationType.None);
+
+            var result = Subject.AuthenticationMethod;
+
+            result.Should().Be(AuthenticationType.Forms);
+            Subject.GetValue("AuthenticationMethod", string.Empty).Should().Be("forms");
+        }
+
+        [Test]
+        public void should_not_coerce_none_from_auth_options()
+        {
+            Mocker.GetMock<IOptions<AuthOptions>>()
+                .Setup(v => v.Value)
+                .Returns(new AuthOptions { Method = "None" });
+
+            var result = Subject.AuthenticationMethod;
+
             result.Should().Be(AuthenticationType.None);
+        }
+
+        [Test]
+        public void should_not_coerce_external_authentication()
+        {
+            Subject.SetValue("AuthenticationMethod", AuthenticationType.External);
+
+            var result = Subject.AuthenticationMethod;
+
+            result.Should().Be(AuthenticationType.External);
         }
 
         [Test]

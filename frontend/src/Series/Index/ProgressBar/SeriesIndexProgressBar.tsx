@@ -1,19 +1,17 @@
-import React from 'react';
-import { useSelector } from 'react-redux';
+import React, { useMemo } from 'react';
+import { useQueueDetailsForSeries } from 'Activity/Queue/Details/QueueDetailsProvider';
 import ProgressBar from 'Components/ProgressBar';
 import { sizes } from 'Helpers/Props';
-import createSeriesQueueItemsDetailsSelector, {
-  SeriesQueueDetails,
-} from 'Series/Index/createSeriesQueueDetailsSelector';
+import { SeriesStatus } from 'Series/Series';
 import getProgressBarKind from 'Utilities/Series/getProgressBarKind';
 import translate from 'Utilities/String/translate';
-import styles from './SeriesIndexProgressBar.css';
+import styles from './SeriesIndexProgressBar.module.css';
 
 interface SeriesIndexProgressBarProps {
   seriesId: number;
   seasonNumber?: number;
   monitored: boolean;
-  status: string;
+  status: SeriesStatus;
   episodeCount: number;
   episodeFileCount: number;
   totalEpisodeCount: number;
@@ -36,9 +34,19 @@ function SeriesIndexProgressBar(props: SeriesIndexProgressBarProps) {
     isStandalone,
   } = props;
 
-  const queueDetails: SeriesQueueDetails = useSelector(
-    createSeriesQueueItemsDetailsSelector(seriesId, seasonNumber)
-  );
+  const queueDetails = useQueueDetailsForSeries(seriesId, seasonNumber);
+
+  const containerClassName = useMemo(() => {
+    if (isStandalone) {
+      return undefined;
+    }
+
+    if (detailedProgressBar) {
+      return styles.progressDetailed;
+    }
+
+    return styles.progress;
+  }, [isStandalone, detailedProgressBar]);
 
   const newDownloads = queueDetails.count - queueDetails.episodesWithFiles;
   const progress = episodeCount ? (episodeFileCount / episodeCount) * 100 : 100;
@@ -48,8 +56,10 @@ function SeriesIndexProgressBar(props: SeriesIndexProgressBarProps) {
 
   return (
     <ProgressBar
-      className={styles.progressBar}
-      containerClassName={isStandalone ? undefined : styles.progress}
+      className={
+        detailedProgressBar ? styles.progressBarDetailed : styles.progressBar
+      }
+      containerClassName={containerClassName}
       progress={progress}
       kind={getProgressBarKind(
         status,
